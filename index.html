@@ -382,7 +382,7 @@
     <div class="table-wrap table-scroll table-novas-wrap" style="margin-bottom:16px">
       <table class="table-novas">
         <thead>
-          <tr><th><input type="checkbox" id="check-todas-lote" onchange="alternarTodasVisiveis(this.checked)"></th><th>Empresa</th><th>Centro de Custo</th><th>Fornecedor</th><th>Plano de Contas</th><th>Histórico</th><th>Tipo</th><th>Número</th><th>Documento</th><th>Código Domínio</th></tr>
+          <tr><th><input type="checkbox" id="check-todas-lote" onchange="alternarTodasVisiveis(this.checked)"></th><th>Empresa</th><th>Centro de Custo</th><th>Banco/Caixa</th><th>Fornecedor</th><th>Plano de Contas</th><th>Histórico</th><th>Tipo</th><th>Número</th><th>Documento</th><th>Código Domínio</th></tr>
         </thead>
         <tbody id="tbody-novas-chaves"></tbody>
       </table>
@@ -1416,7 +1416,7 @@ function prepararPagamentosImportados(dados, abrirTelaPendencias = true) {
         const chaveAjuste = montarChave(forn, plano, tipoPonta, historico, escopoRegra);
         if (!encontrarCodigoRegraAjuste(regrasSalvas, forn, plano, tipoAjusteRateio, ponta, historico, escopoRegra) && !vistas.has(chaveAjuste)) {
           vistas.add(chaveAjuste);
-          novas.push({ chave: chaveAjuste, fornecedor: forn, plano, tipoDoc: tipoPonta, historico, trechoHistorico: '', trechoHistoricoIndices: [], numero, empresa: empresaOrigem, empresaOrigem, centroCusto, empresaLancamento: empresaLancamentoLinha(r), rateio: !!r.__rateio, escopoRegra });
+          novas.push({ chave: chaveAjuste, fornecedor: forn, plano, tipoDoc: tipoPonta, historico, trechoHistorico: '', trechoHistoricoIndices: [], numero, empresa: empresaOrigem, empresaOrigem, centroCusto, conta: limparTextoECD(r[COLS.CONTA]), empresaLancamento: empresaLancamentoLinha(r), rateio: !!r.__rateio, escopoRegra });
         }
       });
       return;
@@ -1424,7 +1424,7 @@ function prepararPagamentosImportados(dados, abrirTelaPendencias = true) {
     const chave = montarChave(forn, plano, tipoDoc, historico, escopoRegra);
     if (!encontrarCodigoRegra(regrasSalvas, forn, plano, tipoDoc, historico, escopoRegra) && !vistas.has(chave)) {
       vistas.add(chave);
-      novas.push({ chave, fornecedor: forn, plano, tipoDoc, historico, trechoHistorico: '', trechoHistoricoIndices: [], numero, empresa: empresaOrigem, empresaOrigem, centroCusto, empresaLancamento: empresaLancamentoLinha(r), rateio: !!r.__rateio, escopoRegra });
+      novas.push({ chave, fornecedor: forn, plano, tipoDoc, historico, trechoHistorico: '', trechoHistoricoIndices: [], numero, empresa: empresaOrigem, empresaOrigem, centroCusto, conta: limparTextoECD(r[COLS.CONTA]), empresaLancamento: empresaLancamentoLinha(r), rateio: !!r.__rateio, escopoRegra });
     }
     if (rateioIntercompanyLinha(r)) {
       const linhaRateioNegativa = arredondarMoeda(r[COLS.VALOR_LIQ]) < 0;
@@ -1445,6 +1445,7 @@ function prepararPagamentosImportados(dados, abrirTelaPendencias = true) {
             empresa: empresaOrigem,
             empresaOrigem,
             centroCusto,
+            conta: limparTextoECD(r[COLS.CONTA]),
             empresaLancamento: empresaLancamentoLinha(r),
             rateio: !!r.__rateio,
             escopoRegra,
@@ -1463,7 +1464,7 @@ function prepararPagamentosImportados(dados, abrirTelaPendencias = true) {
         const chaveAjuste = montarChave(forn, plano, tipoPonta, historico, escopoRegra);
         if (!encontrarCodigoRegraAjuste(regrasSalvas, forn, plano, tipoAjuste, ponta, historico, escopoRegra) && !vistas.has(chaveAjuste)) {
           vistas.add(chaveAjuste);
-          novas.push({ chave: chaveAjuste, fornecedor: forn, plano, tipoDoc: tipoPonta, historico, trechoHistorico: '', trechoHistoricoIndices: [], numero, empresa: empresaOrigem, empresaOrigem, centroCusto, empresaLancamento: empresaLancamentoLinha(r), rateio: !!r.__rateio, escopoRegra });
+          novas.push({ chave: chaveAjuste, fornecedor: forn, plano, tipoDoc: tipoPonta, historico, trechoHistorico: '', trechoHistoricoIndices: [], numero, empresa: empresaOrigem, empresaOrigem, centroCusto, conta: limparTextoECD(r[COLS.CONTA]), empresaLancamento: empresaLancamentoLinha(r), rateio: !!r.__rateio, escopoRegra });
         }
       });
     }
@@ -3999,7 +4000,7 @@ function alternarSelecionadasLoteEncoded(chavesEncoded, marcada) {
 
 function renderLinhaAjustePar(linha) {
   const baseItem = linha.item;
-  const { chave, fornecedor, plano, historico, trechoHistorico, numero, empresa, centroCusto, empresaOrigem, rateio } = baseItem;
+  const { chave, fornecedor, plano, historico, trechoHistorico, numero, empresa, centroCusto, conta, empresaOrigem, rateio } = baseItem;
   const infoDoc = separarNumeroDoHistorico(baseItem.tipoDoc, numero, historico);
   const historicoExibido = infoDoc.historico;
   const palavras = renderPalavrasHistorico(chave, historicoExibido, trechoHistorico);
@@ -4019,6 +4020,7 @@ function renderLinhaAjustePar(linha) {
     <td><input type="checkbox" ${selecionado ? 'checked' : ''} onchange="alternarSelecionadasLoteEncoded('${escapeAttr(chavesParEncoded)}', this.checked)"></td>
     <td title="${escapeAttr(empresa || '')}"><div class="cell-main">${escapeHtml(empresa || '')}</div></td>
     <td title="${escapeAttr(centroCusto || '')}" style="color:var(--text2)">${escapeHtml(centroCusto || '')}</td>
+    <td title="${escapeAttr(conta || '')}" style="color:var(--text2)">${escapeHtml(conta || '')}</td>
     <td title="${escapeAttr(fornecedor)}"><div class="cell-main">${escapeHtml(fornecedor)}</div></td>
     <td title="${escapeAttr(plano)}"><div class="cell-main">${escapeHtml(plano)}</div></td>
     <td title="${escapeAttr([linha.ajuste, historicoExibido].filter(Boolean).join(' - '))}" style="color:var(--text2)">
@@ -4046,14 +4048,14 @@ function renderNovasChaves() {
   const somentePendentes = document.getElementById('somente-pendentes')?.checked ?? true;
   const visiveis = filtrarNovasChaves(novasChavesTemp, filtro, somentePendentes);
   if (visiveis.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text2);padding:32px">Nenhuma pendência visível com os filtros atuais.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text2);padding:32px">Nenhuma pendência visível com os filtros atuais.</td></tr>`;
     atualizarStatusLote(visiveis);
     return;
   }
   const linhasVisiveis = montarLinhasNovasChavesVisiveis(visiveis);
   tbody.innerHTML = linhasVisiveis.map(linha => {
     if (linha.tipo === 'ajuste-par') return renderLinhaAjustePar(linha);
-    const { chave, fornecedor, plano, tipoDoc, historico, trechoHistorico, numero, empresa, centroCusto, empresaOrigem, rateio, pontaNumerario, naturezaNumerario } = linha.item;
+    const { chave, fornecedor, plano, tipoDoc, historico, trechoHistorico, numero, empresa, centroCusto, conta, empresaOrigem, rateio, pontaNumerario, naturezaNumerario } = linha.item;
     const infoDoc = separarNumeroDoHistorico(tipoDoc, numero, historico);
     const historicoExibido = infoDoc.historico;
     const isAjuste = tipoDoc === 'DESCONTO' || tipoDoc === 'ACRÉSCIMO' || tipoDoc.startsWith('DESCONTO -') || tipoDoc.startsWith('ACRÉSCIMO -');
@@ -4089,6 +4091,7 @@ function renderNovasChaves() {
       <td><input type="checkbox" data-chave="${escapeAttr(chave)}" ${selecionadasLote.has(chave) ? 'checked' : ''} onchange="alternarSelecionadaLote(this.dataset.chave, this.checked)"></td>
       <td title="${escapeAttr(empresa || '')}"><div class="cell-main">${escapeHtml(empresa || '')}</div></td>
       <td title="${escapeAttr(centroCusto || '')}" style="color:var(--text2)">${escapeHtml(centroCusto || '')}</td>
+      <td title="${escapeAttr(conta || '')}" style="color:var(--text2)">${escapeHtml(conta || '')}</td>
       <td title="${escapeAttr(fornecedor)}"><div class="cell-main">${escapeHtml(fornecedor)}</div></td>
       <td title="${escapeAttr(plano)}"><div class="cell-main">${escapeHtml(plano)}</div></td>
       <td title="${escapeAttr(historicoVisual)}" style="color:var(--text2)">
@@ -4232,7 +4235,7 @@ function ocultarPendenciaPreenchida(inp, focarProximo = false) {
   inp.closest('tr')?.remove();
   const visiveis = obterNovasChavesVisiveis();
   if (visiveis.length === 0) {
-    document.getElementById('tbody-novas-chaves').innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text2);padding:32px">Nenhuma pendência visível com os filtros atuais.</td></tr>`;
+    document.getElementById('tbody-novas-chaves').innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text2);padding:32px">Nenhuma pendência visível com os filtros atuais.</td></tr>`;
   }
   atualizarStatusLote(visiveis);
   if (focarProximo && proximo) focarCampoCodigo(proximo);
