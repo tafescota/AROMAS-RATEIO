@@ -5035,8 +5035,20 @@ function renderPercentuaisRateioFixo() {
     </div>
     <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
       <button class="btn btn-sm" onclick="adicionarPercentualFixo()">+ Adicionar unidade</button>
-      <span class="conciliacao-status ${bateTotal ? 'ok' : 'warn'}">Total: ${total.toFixed(2)}%${bateTotal ? '' : ' — precisa somar 100%'}</span>
+      <span id="badge-total-percentual-fixo" class="conciliacao-status ${bateTotal ? 'ok' : 'warn'}">Total: ${total.toFixed(2)}%${bateTotal ? '' : ' — precisa somar 100%'}</span>
     </div>`;
+}
+
+// Atualiza só o número do total, sem redesenhar a tabela inteira — assim o campo
+// que o usuário está digitando não perde o foco a cada tecla.
+function atualizarTotalPercentualFixo() {
+  const badge = document.getElementById('badge-total-percentual-fixo');
+  if (!badge) return;
+  const regra = regraPercentualAtual();
+  const total = regra.reduce((s, r) => s + (parseFloat(r.percentual) || 0), 0);
+  const bateTotal = Math.abs(total - 100) <= 0.01;
+  badge.className = `conciliacao-status ${bateTotal ? 'ok' : 'warn'}`;
+  badge.textContent = `Total: ${total.toFixed(2)}%${bateTotal ? '' : ' — precisa somar 100%'}`;
 }
 
 function adicionarPercentualFixo() {
@@ -5049,6 +5061,7 @@ function adicionarPercentualFixo() {
 function editarPercentualFixo(i, campo, valor) {
   if (!grupoAtivo || !percentuaisRateioFixo[grupoAtivo]?.[i]) return;
   percentuaisRateioFixo[grupoAtivo][i][campo] = campo === 'percentual' ? valor : limparTextoECD(valor);
+  if (campo === 'percentual') atualizarTotalPercentualFixo();
 }
 
 function removerPercentualFixo(i) {
