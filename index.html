@@ -674,16 +674,24 @@ function ehDescontoComercial(plano, valor) {
 // Retenção legal de folha (INSS, FGTS, IRRF) dentro de um rateio: reduz o valor lançado no
 // banco (linha principal do movimento), mas NÃO gera lançamento próprio — a obrigação já é
 // lançada no sistema contábil por outro processo (provisão feita à parte).
-function ehRetencaoFolhaSemLancamento(plano, valor) {
+function ehRetencaoFolhaSemLancamento(plano, valor, tipoDoc = '') {
   const planoNorm = normalizarTexto(plano);
-  return valor < 0 && (planoNorm.includes('inss') || planoNorm.includes('fgts') || planoNorm.includes('irrf'));
+  if (valor >= 0) return false;
+  if (planoNorm.includes('inss') || planoNorm.includes('fgts') || planoNorm.includes('irrf')) return true;
+  // Qualquer outro "Desconto ..." de folha (férias, adiantamento, 13º etc.) — desde que NÃO
+  // seja o desconto comercial de fornecedor/nota fiscal ("Descontos sobre Despesas", que
+  // segue outro caminho, com lançamento de ajuste próprio) — também é retenção/dedução da
+  // folha e deve ser absorvida, não ficar como lançamento próprio.
+  if (planoNorm.includes('despesas')) return false;
+  const tipoDocNorm = normalizarTexto(tipoDoc);
+  return planoNorm.startsWith('desconto') && tipoDocNorm.includes('folha de pagamento');
 }
 
 // Usado só para agrupar/absorver no lado do banco: os dois tipos acima reduzem o valor
 // lançado na linha principal do mesmo movimento bancário real (mesma guia/folha, mesmo dia,
 // mesma conta — sem olhar só a fatia de uma empresa).
-function ehDescontoComercialAbsorvivel(plano, valor) {
-  return ehDescontoComercial(plano, valor) || ehRetencaoFolhaSemLancamento(plano, valor);
+function ehDescontoComercialAbsorvivel(plano, valor, tipoDoc = '') {
+  return ehDescontoComercial(plano, valor) || ehRetencaoFolhaSemLancamento(plano, valor, tipoDoc);
 }
 
 function tipoAjusteRateioPlano(plano, valor) {
@@ -1518,14 +1526,15 @@ function prepararPagamentosImportados(dados, abrirTelaPendencias = true) {
     const chave = chaveGuiaAbsorverRateio(r);
     const valor = arredondarMoeda(r[COLS.VALOR_LIQ]);
     const planoLinha = limparTextoECD(r[COLS.PLANO]);
+    const tipoDocLinha = limparTextoECD(r[COLS.TIPO_DOC]);
     if (!gruposAbsorverPreviewPend.has(chave)) gruposAbsorverPreviewPend.set(chave, []);
-    gruposAbsorverPreviewPend.get(chave).push({ valor, plano: planoLinha });
+    gruposAbsorverPreviewPend.get(chave).push({ valor, plano: planoLinha, tipoDoc: tipoDocLinha });
   });
   const gruposComAbsorvedorPend = new Set();
   gruposAbsorverPreviewPend.forEach((linhas, chave) => {
-    const descontos = linhas.filter(l => ehDescontoComercialAbsorvivel(l.plano, l.valor));
+    const descontos = linhas.filter(l => ehDescontoComercialAbsorvivel(l.plano, l.valor, l.tipoDoc));
     if (descontos.length === 0) return;
-    const candidatos = linhas.filter(l => !ehDescontoComercialAbsorvivel(l.plano, l.valor) && l.valor > 0);
+    const candidatos = linhas.filter(l => !ehDescontoComercialAbsorvivel(l.plano, l.valor, l.tipoDoc) && l.valor > 0);
     if (candidatos.length === 0) return;
     const totalDesconto = arredondarMoeda(descontos.reduce((s, l) => s + l.valor, 0));
     const principal = candidatos.reduce((max, l) => (l.valor > max.valor ? l : max), candidatos[0]);
@@ -1547,7 +1556,7 @@ function prepararPagamentosImportados(dados, abrirTelaPendencias = true) {
     const valorRateio = arredondarMoeda(r[COLS.VALOR_LIQ]);
     const tipoAjusteRateio = r.__rateio ? tipoAjusteRateioPlano(plano, valorRateio) : '';
     if (!forn && !plano) return;
-    if (r.__rateio && ehRetencaoFolhaSemLancamento(plano, valorRateio) && gruposComAbsorvedorPend.has(chaveGuiaAbsorverRateio(r))) {
+    if (r.__rateio && ehRetencaoFolhaSemLancamento(plano, valorRateio, tipoDoc) && gruposComAbsorvedorPend.has(chaveGuiaAbsorverRateio(r))) {
       return; // retenção (INSS/FGTS/IRRF) absorvida na linha principal do mesmo movimento bancário, não precisa de código próprio
     }
     if (tipoAjusteRateio) {
@@ -4639,15 +4648,16 @@ function gerarLancamentos(dados, regras) {
     const chave = chaveGuiaAbsorverRateio(r);
     const valor = arredondarMoeda(r[COLS.VALOR_LIQ]);
     const plano = limparTextoECD(r[COLS.PLANO]);
+    const tipoDocLinha = limparTextoECD(r[COLS.TIPO_DOC]);
     if (!gruposAbsorverPreview.has(chave)) gruposAbsorverPreview.set(chave, []);
-    gruposAbsorverPreview.get(chave).push({ idx, valor, plano });
+    gruposAbsorverPreview.get(chave).push({ idx, valor, plano, tipoDoc: tipoDocLinha });
   });
   const absorvedorPorGrupo = new Map();
   const valorAbsorverPorGrupo = new Map();
   gruposAbsorverPreview.forEach((linhas, chave) => {
-    const descontos = linhas.filter(l => ehDescontoComercialAbsorvivel(l.plano, l.valor));
+    const descontos = linhas.filter(l => ehDescontoComercialAbsorvivel(l.plano, l.valor, l.tipoDoc));
     if (descontos.length === 0) return;
-    const candidatos = linhas.filter(l => !ehDescontoComercialAbsorvivel(l.plano, l.valor) && l.valor > 0);
+    const candidatos = linhas.filter(l => !ehDescontoComercialAbsorvivel(l.plano, l.valor, l.tipoDoc) && l.valor > 0);
     if (candidatos.length === 0) return;
     const principal = candidatos.reduce((max, l) => (l.valor > max.valor ? l : max), candidatos[0]);
     const totalDescontoGrupo = arredondarMoeda(descontos.reduce((s, l) => s + l.valor, 0));
@@ -4665,7 +4675,7 @@ function gerarLancamentos(dados, regras) {
     if (!forn && !plano && !tipoDoc && !historico) return;
     if (r.__rateio) {
       const valorRateioAtual = arredondarMoeda(r[COLS.VALOR_LIQ]);
-      if (ehRetencaoFolhaSemLancamento(plano, valorRateioAtual) && absorvedorPorGrupo.has(chaveGuiaAbsorverRateio(r))) {
+      if (ehRetencaoFolhaSemLancamento(plano, valorRateioAtual, tipoDoc) && absorvedorPorGrupo.has(chaveGuiaAbsorverRateio(r))) {
         return; // retenção (INSS/FGTS/IRRF) absorvida na linha principal (Própria ou intercompany), sem lançamento próprio
       }
     }
