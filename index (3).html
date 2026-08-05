@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Conciliador de Rateio — ZIP Contabilidade</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+</head>
+<body>
+
+<!-- ============ TOPBAR ============ -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <span class="mark">Conciliador de Rateio</span>
+    <span class="sub">ZIP CONTABILIDADE</span>
+  </div>
+  <div class="topbar-processo">
+    <span>Processo:</span>
+    <select id="seletorProcesso">
+      <option>Novo processamento…</option>
+      <option disabled>— nenhum processamento salvo ainda —</option>
+    </select>
+  </div>
+</header>
+
+<!-- ============ STATUS RAIL (elemento de assinatura — item 20 da spec) ============ -->
+<div class="status-rail" id="statusRail">
+  <!-- preenchido via JS a partir de STATUS_RAIL_ITEMS -->
+</div>
+
+<!-- ============ NAV LATERAL ============ -->
+<nav class="nav" id="nav">
+  <div class="nav-group-label">Entrada</div>
+  <div class="nav-item" data-screen="tela1"><span class="num">01</span> Novo processamento</div>
+
+  <div class="nav-group-label">Extrato</div>
+  <div class="nav-item" data-screen="tela2"><span class="num">02</span> Resultado do extrato</div>
+  <div class="nav-item" data-screen="tela3"><span class="num">03</span> Conciliação</div>
+
+  <div class="nav-group-label">Motores</div>
+  <div class="nav-item" data-screen="tela4"><span class="num">04</span> Rateios</div>
+  <div class="nav-item" data-screen="tela5"><span class="num">05</span> Folha</div>
+  <div class="nav-item" data-screen="tela6"><span class="num">06</span> Numerários</div>
+
+  <div class="nav-group-label">Contábil</div>
+  <div class="nav-item" data-screen="tela7"><span class="num">07</span> DE-PARA <span class="badge">fase 2</span></div>
+
+  <div class="nav-group-label">Liberação</div>
+  <div class="nav-item" data-screen="tela8"><span class="num">08</span> Validações</div>
+  <div class="nav-item" data-screen="tela9"><span class="num">09</span> Exportação</div>
+</nav>
+
+<!-- ============ MAIN ============ -->
+<main>
+
+  <!-- ===================== TELA 1 — NOVO PROCESSAMENTO ===================== -->
+  <section class="screen" id="tela1">
+    <div class="screen-header">
+      <div class="screen-eyebrow">Tela 01 · Entrada</div>
+      <h1>Novo processamento</h1>
+      <p>Defina a empresa dona do banco, o período e envie os arquivos de origem. Nenhuma linha do extrato é descartada — o extrato é soberano.</p>
+    </div>
+
+    <div class="section-title">Identificação</div>
+    <div class="form-row cols-3">
+      <div class="field">
+        <label>Grupo econômico</label>
+        <select><option>Selecione…</option><option>CP Aromas (Cachoeira / Muritiba / ADM Central)</option></select>
+        <div class="hint">Matriz + filiais processadas juntas, no mesmo lote.</div>
+      </div>
+      <div class="field"><label>Período — início</label><input type="date"></div>
+      <div class="field"><label>Período — fim</label><input type="date"></div>
+    </div>
+
+    <div class="section-title">Mapeamento conta → empresa titular</div>
+    <p style="margin:-6px 0 14px;font-size:12.5px;color:var(--ink-soft);max-width:640px;">
+      O extrato do grupo traz várias contas numa linha só. Cada conta precisa de uma empresa titular
+      definida antes do processamento (item 4 da spec) — o sistema detecta pelo nome da conta no
+      arquivo e você só confirma ou ajusta.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Conta (como aparece no extrato)</th><th>Empresa titular</th><th>Conta contábil do banco</th><th>Saldo anterior</th><th></th></tr></thead>
+        <tbody id="tabelaContasMapeamento"><!-- preenchido via JS --></tbody>
+      </table>
+    </div>
+    <div class="btn-row" style="margin-top:10px;">
+      <button class="btn-ghost" id="btnAddConta" style="border:1px dashed var(--border-strong);color:var(--ink-soft);">+ Adicionar conta manualmente</button>
+    </div>
+
+    <div class="section-title">Arquivos de entrada</div>
+    <div class="grid cols-2">
+      <label class="dropzone" data-tipo="extrato"><div class="icon">XLS</div><div class="txt"><strong>Extrato bancário</strong><span id="status-extrato">Base principal da conciliação — obrigatório</span></div><input type="file" accept=".xlsx" hidden></label>
+      <label class="dropzone" data-tipo="pagar"><div class="icon">XLS</div><div class="txt"><strong>Rateio de títulos a pagar</strong><span id="status-pagar">Fornecedor, documento, conta, rateio</span></div><input type="file" accept=".xlsx" hidden></label>
+      <label class="dropzone" data-tipo="receber"><div class="icon">XLS</div><div class="txt"><strong>Rateio de títulos a receber</strong><span id="status-receber">Cliente, documento, conta, rateio</span></div><input type="file" accept=".xlsx" hidden></label>
+      <label class="dropzone" data-tipo="cartoes"><div class="icon">XLS</div><div class="txt"><strong>Rateio de cartões</strong><span id="status-cartoes">Pode selecionar mais de um arquivo (ex: parte 1 e 2)</span></div><input type="file" accept=".xlsx" multiple hidden></label>
+      <label class="dropzone" data-tipo="folha"><div class="icon">XLS</div><div class="txt"><strong>Folha de pagamento</strong><span id="status-folha">Ainda não disponível — opcional nesta fase</span></div><input type="file" accept=".xlsx" hidden></label>
+      <label class="dropzone" data-tipo="empresas"><div class="icon">XLS</div><div class="txt"><strong>Cadastro de empresas</strong><span id="status-empresas">Matriz, filial, CNPJ, dona do banco</span></div><input type="file" accept=".xlsx" hidden></label>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-primary" id="btnProcessar">Processar arquivos</button>
+      <button class="btn-secondary">Salvar rascunho</button>
+    </div>
+    <p id="msgProcessamento" style="font-size:12.5px;color:var(--ink-soft);margin-top:10px;"></p>
+  </section>
+
+  <!-- ===================== TELA 2 — RESULTADO DO EXTRATO ===================== -->
+  <section class="screen" id="tela2">
+    <div class="screen-header">
+      <div class="screen-eyebrow">Tela 02 · Extrato</div>
+      <h1>Resultado do extrato</h1>
+      <p>Conferência de totais antes de qualquer conciliação: saldo anterior + entradas − saídas deve fechar exatamente com o saldo final declarado.</p>
+    </div>
+
+    <div class="grid cols-4">
+      <div class="card"><h3>Movimentos</h3><div class="value muted" id="card-movimentos">—</div><div class="foot" id="foot-movimentos">aguardando processamento</div></div>
+      <div class="card"><h3>Entradas</h3><div class="value muted" id="card-entradas">—</div><div class="foot">soma de valores positivos</div></div>
+      <div class="card"><h3>Saídas</h3><div class="value muted" id="card-saidas">—</div><div class="foot">soma de valores negativos</div></div>
+      <div class="card"><h3>Saldo final</h3><div class="value muted" id="card-saldo-final">—</div><div class="foot">declarado no extrato</div></div>
+    </div>
+
+    <div class="section-title">Conferência</div>
+    <div class="grid cols-3">
+      <div class="card"><h3>Saldo anterior</h3><div class="value muted" id="card-saldo-anterior">—</div></div>
+      <div class="card"><h3>Duplicidades encontradas</h3><div class="value muted" id="card-duplicidades">—</div><div class="foot">candidatas — nem toda duplicidade é erro</div></div>
+      <div class="card"><h3>Diferença de fechamento</h3><div class="value muted" id="card-diferenca">—</div><div class="foot" id="foot-diferenca">saldo anterior + entradas − saídas vs. saldo final</div></div>
+    </div>
+
+    <div class="section-title">Movimentos</div>
+    <div id="tela2-resumo" class="empty-state">
+      <div class="glyph">＋</div>
+      <strong>Nenhum extrato carregado ainda</strong>
+      <span>Envie o arquivo na Tela 01 e clique em "Processar arquivos".</span>
+    </div>
+  </section>
+
+  <!-- ===================== TELA 3 — CONCILIAÇÃO ===================== -->
+  <section class="screen" id="tela3">
+    <div class="screen-header">
+      <div class="screen-eyebrow">Tela 03 · Extrato</div>
+      <h1>Conciliação</h1>
+      <p>Cada linha do extrato, classificada pela ordem de match: título exato → agrupamento → cartão → rateio → folha → somente extrato.</p>
+    </div>
+
+    <div class="chip-row" id="chipsConciliacao">
+      <span class="chip active" data-filtro="Todos">Todos</span>
+      <span class="chip" data-filtro="Parcelas de Títulos">Título (Parcelas de Títulos)</span>
+      <span class="chip" data-filtro="Parcelas de Cartões">Cartão (Parcelas de Cartões)</span>
+      <span class="chip" data-filtro="Transferência entre Contas">Transferência entre Contas</span>
+      <span class="chip" data-filtro="Conciliação Mista">Conciliação Mista</span>
+      <span class="chip" data-filtro="SEM_TAG">Somente extrato (sem tag)</span>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Data</th><th>Histórico</th><th>Documento</th><th class="num">Valor</th><th>Status</th><th>Empresa</th></tr></thead>
+        <tbody id="tabelaConciliacao">
+          <tr><td colspan="6"><div class="empty-state" style="border:none;background:none;padding:26px;">
+            <span>Nenhum movimento processado ainda — envie os arquivos na Tela 01.</span>
+          </div></td></tr>
+        </tbody>
+      </table>
+      <p id="rodapeConciliacao" style="font-size:11.5px;color:var(--ink-muted);padding:10px 12px;margin:0;"></p>
+    </div>
+
+    <div class="section-title">Apontamentos</div>
+    <p style="margin:-6px 0 14px;font-size:12.5px;color:var(--ink-soft);max-width:680px;">
+      O extrato é soberano — quando algo não bate, a diferença não é forçada no banco. Estas são as linhas
+      das planilhas financeiras (títulos/cartões) que precisam de correção na origem.
+    </p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Origem</th><th>Problema</th><th>Fornecedor/Cliente</th><th>Empresa</th><th>Centro de custo</th><th>Plano de contas</th><th class="num">Valor</th></tr></thead>
+        <tbody id="tabelaApontamentos">
+          <tr><td colspan="7"><div class="empty-state" style="border:none;background:none;padding:26px;">
+            <span>Nenhum apontamento gerado ainda.</span>
+          </div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== TELA 4 — RATEIOS ===================== -->
+  <section class="screen" id="tela4">
+    <div class="screen-header">
+      <div class="screen-eyebrow">Tela 04 · Motores</div>
+      <h1>Rateios</h1>
+      <p>Para cada título rateado: soma das linhas do rateio deve bater com o valor líquido do título (tolerância R$ 0,01). Se não bater, o título fica bloqueado.</p>
+    </div>
+
+    <div class="grid cols-3">
+      <div class="card"><h3>Títulos rateados</h3><div class="value muted">—</div></div>
+      <div class="card"><h3>Rateios batendo</h3><div class="value muted">—</div></div>
+      <div class="card"><h3>Rateios com diferença</h3><div class="value muted">—</div></div>
+    </div>
+
+    <div class="section-title">Detalhe por título</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Título</th><th class="num">Valor líquido</th><th>Linhas do rateio</th><th class="num">Soma</th><th class="num">Diferença</th><th>Empresas envolvidas</th><th>Conta contábil</th></tr></thead>
+        <tbody>
+          <tr><td colspan="7"><div class="empty-state" style="border:none;background:none;padding:26px;">
+            <span>Nenhum rateio processado ainda.</span>
+          </div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== TELA 5 — FOLHA ===================== -->
+  <section class="screen" id="tela5">
+    <div class="screen-header">
+      <div class="screen-eyebrow">Tela 05 · Motores</div>
+      <h1>Folha de pagamento</h1>
+      <p>A conciliação bancária importa apenas o valor líquido pago — a folha já contabiliza salários, encargos e provisões separadamente, isso não pode ser lançado duas vezes.</p>
+    </div>
+
+    <div class="grid cols-3">
+      <div class="card"><h3>Grupos de folha</h3><div class="value muted">—</div><div class="foot">funcionário + movimento bancário</div></div>
+      <div class="card"><h3>Líquido batendo com o banco</h3><div class="value muted">—</div></div>
+      <div class="card"><h3>Diferenças &gt; R$ 0,01</h3><div class="value muted">—</div><div class="foot">bloqueiam a liberação</div></div>
+    </div>
+
+    <div class="section-title">Por funcionário</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Funcionário</th><th class="num">Positivos</th><th class="num">Descontos</th><th class="num">Líquido</th><th class="num">Banco</th><th class="num">Diferença</th></tr></thead>
+        <tbody>
+          <tr><td colspan="6"><div class="empty-state" style="border:none;background:none;padding:26px;">
+            <span>Base de folha ainda não enviada — opcional nesta fase do desenvolvimento.</span>
+          </div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== TELA 6 — NUMERÁRIOS ===================== -->
+  <section class="screen" id="tela6">
+    <div class="screen-header">
+      <div class="screen-eyebrow">Tela 06 · Motores</div>
+      <h1>Numerários entre empresas</h1>
+      <p>Quando o centro de custo do rateio é de outra empresa, o valor transita pelas contas estruturais 63 (ativo) e 1239 (passivo). Débitos da 63 devem fechar com créditos da 1239, e vice-versa.</p>
+    </div>
+
+    <div class="grid cols-4">
+      <div class="card"><h3>Débito 63</h3><div class="value muted">—</div></div>
+      <div class="card"><h3>Crédito 1239</h3><div class="value muted">—</div></div>
+      <div class="card"><h3>Diferença</h3><div class="value muted">—</div></div>
+      <div class="card"><h3>Lançamentos sem par</h3><div class="value muted">—</div></div>
+    </div>
+
+    <div class="section-title">Resumo por empresa</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Empresa</th><th class="num">Ativo (63)</th><th class="num">Passivo (1239)</th><th class="num">Saldo líquido</th></tr></thead>
+        <tbody>
+          <tr><td colspan="4"><div class="empty-state" style="border:none;background:none;padding:26px;">
+            <span>Nenhum numerário calculado ainda.</span>
+          </div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== TELA 7 — DE-PARA (FASE 2) ===================== -->
+  <section class="screen" id="tela7">
+    <div class="screen-header">
+      <div class="screen-eyebrow">Tela 07 · Contábil · <strong style="color:var(--warn)">em construção — fase 2</strong></div>
+      <h1>DE-PARA contábil</h1>
+      <p>Chave: Fornecedor/Cliente + Plano de Contas de origem + Centro de Custo → conta contábil do Domínio. Combinações novas ficam pendentes até serem definidas uma vez; depois disso, nunca mais são perguntadas.</p>
+    </div>
+
+    <div class="empty-state">
+      <div class="glyph">⏳</div>
+      <strong>Módulo agendado para a próxima fase</strong>
+      <span>A estrutura da tela já está desenhada; a lógica de match e persistência de regras entra depois que os motores 1–4 estiverem de pé.</span>
+    </div>
+
+    <div class="section-title">Estrutura planejada</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Fornecedor</th><th>CNPJ</th><th>Histórico</th><th>Entrada/Saída</th><th>Empresa</th><th>Conta</th><th>Prioridade</th><th>Confirmado manualmente</th><th>Bloqueado</th><th>Última utilização</th></tr></thead>
+        <tbody>
+          <tr><td colspan="10"><div class="empty-state" style="border:none;background:none;padding:22px;">
+            <span>Sem regras cadastradas ainda.</span>
+          </div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== TELA 8 — VALIDAÇÕES ===================== -->
+  <section class="screen" id="tela8">
+    <div class="screen-header">
+      <div class="screen-eyebrow">Tela 08 · Liberação</div>
+      <h1>Painel de validação</h1>
+      <p>Nenhuma importação é liberada com um item em vermelho. Itens em amarelo indicam revisão recomendada, mas não bloqueiam sozinhos.</p>
+    </div>
+
+    <div class="valid-list" id="listaValidacoes"><!-- preenchido via JS --></div>
+  </section>
+
+  <!-- ===================== TELA 9 — EXPORTAÇÃO ===================== -->
+  <section class="screen" id="tela9">
+    <div class="screen-header">
+      <div class="screen-eyebrow">Tela 09 · Liberação</div>
+      <h1>Exportação</h1>
+      <p>Disponível somente após todas as validações obrigatórias do painel anterior estarem em verde.</p>
+    </div>
+
+    <div class="grid cols-2" id="gridExportacao"><!-- preenchido via JS --></div>
+  </section>
+
+</main>
+
+<script src="parser.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
