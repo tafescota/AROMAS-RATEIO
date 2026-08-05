@@ -4454,10 +4454,15 @@ function salvarNovasChavesEGerar() {
 
 function fmtDate(v) {
   if (!v) return '';
-  if (v instanceof Date) return v.toLocaleDateString('pt-BR');
+  // Usa UTC explicitamente: células de data do Excel podem vir com horários
+  // diferentes (00:00 vs 03:00) dependendo do arquivo de origem. Formatar com
+  // o fuso do navegador (ex: America/Sao_Paulo, UTC-3) faz uma data às 00:00 UTC
+  // "cair" para o dia anterior, enquanto uma às 03:00 UTC fica no dia certo —
+  // isso quebrava a comparação de datas entre título e extrato em 1 dia.
+  if (v instanceof Date) return v.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
   if (typeof v === 'number') {
     const d = new Date(Math.round((v - 25569) * 86400 * 1000));
-    return d.toLocaleDateString('pt-BR');
+    return d.toLocaleDateString('pt-BR', { timeZone: 'UTC' });
   }
   return String(v);
 }
