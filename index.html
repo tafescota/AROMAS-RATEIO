@@ -904,7 +904,7 @@ async function carregarBaseCompartilhada(mostrarMensagem = false) {
     configGrupos = data.configGrupos && typeof data.configGrupos === 'object' ? data.configGrupos : {};
     // Guarda a regra de % contra ser sobrescrita pelo sync automático de 30s
     // enquanto o usuário está com a tela aberta editando (ainda não salvou).
-    const editandoPercentualFixo = document.querySelector('.tela.active')?.id === 'tela-pagamentos-fixo';
+    const editandoPercentualFixo = document.querySelector('.tela.ativa')?.id === 'tela-pagamentos-fixo';
     if (!editandoPercentualFixo) {
       percentuaisRateioFixo = data.percentuaisRateioFixo && typeof data.percentuaisRateioFixo === 'object' ? data.percentuaisRateioFixo : {};
     }
