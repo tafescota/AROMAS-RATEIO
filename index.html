@@ -1514,7 +1514,7 @@ function prepararPagamentosImportados(dados, abrirTelaPendencias = true) {
   const regrasSalvas = depara[grupoAtivo] || {};
   const gruposAbsorverPreviewPend = new Map();
   dados.forEach(r => {
-    if (!r.__rateio || rateioIntercompanyLinha(r)) return;
+    if (!r.__rateio) return;
     const chave = chaveGuiaAbsorverRateio(r);
     const valor = arredondarMoeda(r[COLS.VALOR_LIQ]);
     const planoLinha = limparTextoECD(r[COLS.PLANO]);
@@ -1547,7 +1547,7 @@ function prepararPagamentosImportados(dados, abrirTelaPendencias = true) {
     const valorRateio = arredondarMoeda(r[COLS.VALOR_LIQ]);
     const tipoAjusteRateio = r.__rateio ? tipoAjusteRateioPlano(plano, valorRateio) : '';
     if (!forn && !plano) return;
-    if (r.__rateio && !rateioIntercompanyLinha(r) && ehRetencaoFolhaSemLancamento(plano, valorRateio) && gruposComAbsorvedorPend.has(chaveGuiaAbsorverRateio(r))) {
+    if (r.__rateio && ehRetencaoFolhaSemLancamento(plano, valorRateio) && gruposComAbsorvedorPend.has(chaveGuiaAbsorverRateio(r))) {
       return; // retenção (INSS/FGTS/IRRF) absorvida na linha principal do mesmo movimento bancário, não precisa de código próprio
     }
     if (tipoAjusteRateio) {
@@ -4627,14 +4627,15 @@ function gerarLancamentos(dados, regras) {
   const pendentes = new Set();
   const ajustes = [];
 
-  // Linhas negativas de rateio (não-intercompany) nunca tocam o banco sozinhas — são
-  // desconto comercial ou retenção legal de folha (INSS/FGTS/IRRF), ambos absorvidos na
-  // linha principal (maior valor positivo) da mesma guia/movimento bancário real (olhando
-  // todas as empresas envolvidas, não só uma fatia), sem gerar lançamento nem pedir código
-  // próprio. Não afeta parcela de título nem intercompany de verdade.
+  // Linhas negativas de rateio nunca tocam o banco (ou o numerário) sozinhas — são desconto
+  // comercial ou retenção legal de folha (INSS/FGTS/IRRF), ambos absorvidos na linha
+  // principal (maior valor positivo) da mesma guia/movimento bancário real, seja ela Própria
+  // OU intercompany — senão a fatia de Muritiba/Cachoeira VD (ou qualquer unidade que não é
+  // dona do banco) continuaria gerando o desconto como lançamento de numerário à parte.
+  // Não afeta parcela de título.
   const gruposAbsorverPreview = new Map();
   dados.forEach((r, idx) => {
-    if (!r.__rateio || rateioIntercompanyLinha(r)) return;
+    if (!r.__rateio) return;
     const chave = chaveGuiaAbsorverRateio(r);
     const valor = arredondarMoeda(r[COLS.VALOR_LIQ]);
     const plano = limparTextoECD(r[COLS.PLANO]);
@@ -4662,10 +4663,10 @@ function gerarLancamentos(dados, regras) {
     const infoDoc = separarNumeroDoHistorico(tipoDoc, r[COLS.NUMERO], r[COLS.HISTORICO]);
     const historico = infoDoc.historico;
     if (!forn && !plano && !tipoDoc && !historico) return;
-    if (r.__rateio && !rateioIntercompanyLinha(r)) {
+    if (r.__rateio) {
       const valorRateioAtual = arredondarMoeda(r[COLS.VALOR_LIQ]);
       if (ehRetencaoFolhaSemLancamento(plano, valorRateioAtual) && absorvedorPorGrupo.has(chaveGuiaAbsorverRateio(r))) {
-        return; // retenção (INSS/FGTS/IRRF) absorvida no banco, sem lançamento próprio (obrigação já lançada à parte)
+        return; // retenção (INSS/FGTS/IRRF) absorvida na linha principal (Própria ou intercompany), sem lançamento próprio
       }
     }
     const escopoRegra = escopoRegraLinha(r);
@@ -4686,7 +4687,7 @@ function gerarLancamentos(dados, regras) {
     const intercompanyRateio = rateioIntercompanyLinha(r);
     let valorLancamento = linhaRateioNegativa ? Math.abs(valorLiq) : valorLiq;
     let notaDescontoAbsorvido = '';
-    if (r.__rateio && !intercompanyRateio) {
+    if (r.__rateio) {
       const chaveGuiaAbsorver = chaveGuiaAbsorverRateio(r);
       if (absorvedorPorGrupo.get(chaveGuiaAbsorver) === idx) {
         const totalAbsorvido = valorAbsorverPorGrupo.get(chaveGuiaAbsorver) || 0;
