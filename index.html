@@ -4205,10 +4205,12 @@ function renderNovasChaves() {
         ? 'Conta da despesa/fornecedor'
         : 'Digite o código ou nome da conta';
     const dicaCodigo = ehNumerario
-      ? `Preencher a conta de transferência de numerários ${naturezaLabel.toLowerCase()}.`
+      ? `⚠ Conta de TRÂNSITO entre empresas (numerário ${naturezaLabel.toLowerCase()}) — NÃO é a conta de despesa nem o banco.`
       : tipoRateio === 'TRANSFERENCIA DE NUMERARIOS'
-        ? 'Preencher a conta contábil da despesa/fornecedor, não o banco.'
+        ? 'Conta contábil da despesa/fornecedor (não é numerário, não é banco).'
         : '';
+    const estiloDica = ehNumerario ? 'color:#b45309;font-weight:700' : 'color:var(--text2)';
+    const estiloLinhaNumerario = ehNumerario ? 'background:#fff7ed' : '';
     return `<tr>
       <td><input type="checkbox" data-chave="${escapeAttr(chave)}" ${selecionadasLote.has(chave) ? 'checked' : ''} onchange="alternarSelecionadaLote(this.dataset.chave, this.checked)"></td>
       <td title="${escapeAttr(empresa || '')}"><div class="cell-main">${escapeHtml(empresa || '')}</div></td>
@@ -5278,7 +5280,7 @@ function chavesRegrasFiltradas() {
   if (!grupoAtivo) return [];
   const regras = editandoRegras ? editTemp : (obterBaseRegrasAtiva()[grupoAtivo] || {});
   const filtroRaw = document.getElementById('filtro-regras')?.value || '';
-  const filtro = filtroRaw.toLowerCase();
+  const filtro = normalizarTexto(filtroRaw);
   const filtroCodigoExato = /^[0-9]+$/.test(filtroRaw.trim());
   let chaves = Object.keys(regras);
   if (filtroCodigoExato) {
@@ -5287,7 +5289,7 @@ function chavesRegrasFiltradas() {
   } else if (filtro) {
     chaves = chaves.filter(c => {
       const codigo = obterCodigoContaParaDominio(regras[c]);
-      return c.toLowerCase().includes(filtro) || codigo.toLowerCase().includes(filtro);
+      return normalizarTexto(c).includes(filtro) || normalizarTexto(codigo).includes(filtro);
     });
   }
   return chaves;
@@ -5355,7 +5357,7 @@ function renderRegras() {
   const regrasSalvas = baseAtiva[grupoAtivo] || {};
   const dados = editandoRegras ? editTemp : regrasSalvas;
   const filtroRaw = document.getElementById('filtro-regras').value || '';
-  const filtro = filtroRaw.toLowerCase();
+  const filtro = normalizarTexto(filtroRaw);
   const filtroCodigoExato = /^[0-9]+$/.test(filtroRaw.trim());
   let chaves = Object.keys(regrasSalvas);
   if (filtroCodigoExato) {
@@ -5364,7 +5366,7 @@ function renderRegras() {
   } else if (filtro) {
     chaves = chaves.filter(c => {
       const codigo = obterCodigoContaParaDominio(dados[c] || regrasSalvas[c]);
-      return c.toLowerCase().includes(filtro) || codigo.toLowerCase().includes(filtro);
+      return normalizarTexto(c).includes(filtro) || normalizarTexto(codigo).includes(filtro);
     });
   }
 
