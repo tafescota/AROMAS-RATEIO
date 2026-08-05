@@ -1232,6 +1232,9 @@ function linhasPlanilhaRateio(wb) {
   });
   const dados = raw.slice(headerIdx + 1)
     .filter(r => r && r[col.tipo] && String(r[col.tipo]).trim() !== '')
+    // Alguns relatórios terminam com uma linha de soma geral ("Total:", "Total", "Totais")
+    // na coluna Tipo, sem fornecedor real — isso não é um título, é um rodapé de somatório.
+    .filter(r => !/^totai?s?:?$/i.test(String(r[col.tipo]).trim()) && (col.fornecedor < 0 || r[col.fornecedor]))
     .map(r => normalizarLinhaRateio(r, col));
   return { dados, nomePlanilha };
 }
