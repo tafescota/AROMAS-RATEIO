@@ -137,6 +137,8 @@
   .metric-sub { font-size: 11px; color: var(--text2); margin-top: 6px; line-height: 1.45; }
   .metric-value.warn { color: #d97706; }
   .metric-value.ok { color: #16a34a; }
+  .metric-value.danger { color: #dc2626; }
+  .metric:has(.metric-value.danger) { background: #fef2f2; border-color: #fecaca; }
 
   .section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
 
@@ -435,6 +437,15 @@
       Nenhum item em vermelho deveria ser exportado sem revisão. Itens em amarelo indicam revisão recomendada, mas não bloqueiam sozinhos.
     </p>
     <div id="resumo-validacoes" style="margin-bottom:16px"></div>
+
+    <h3 style="margin:0 0 10px">Saldo de banco/caixa por conta</h3>
+    <p class="conciliacao-note" style="margin-bottom:10px">Saldo anterior + entradas − saídas do extrato importado, comparado com o saldo final declarado, conta por conta.</p>
+    <div id="validacao-saldos-contas" style="margin-bottom:20px"></div>
+
+    <h3 style="margin:0 0 10px">Numerários — Ativo (63) × Passivo (1239)</h3>
+    <p class="conciliacao-note" style="margin-bottom:10px">Toda transferência entre empresas gera uma perna no ativo (empresa dona do banco) e uma no passivo (centro de custo). As somas devem fechar.</p>
+    <div id="validacao-numerarios" style="margin-bottom:20px"></div>
+
     <div class="card" style="padding:0;overflow:hidden">
       <div id="lista-validacoes"></div>
     </div>
@@ -534,6 +545,7 @@ let ultimaSyncLocal = 0;
 let salvandoBaseCompartilhada = false;
 let filtroLoteTimer = null;
 let extratoBancarioTemp = [];
+let saldosAnterioresExtratoTemp = {}; // { [conta]: valor } — usado só pelo painel de validações
 let infoExtratoBancarioTemp = null;
 let mostrarPreviewExtrato = false;
 let conciliacaoItensTemp = [];
@@ -1932,6 +1944,15 @@ function lerMovimentosExtratoArquivo(file) {
           tipoConciliacao: idx('tipo de conciliacao')
         };
 
+        const saldosAnterioresArquivo = {};
+        raw.slice(headerIdx + 1).forEach(row => {
+          const hist = normalizarTexto(col.historico >= 0 ? row[col.historico] : '');
+          const contaLinha = limparTextoECD(col.conta >= 0 ? row[col.conta] : '');
+          if (hist.includes('saldo anterior') && contaLinha && !(contaLinha in saldosAnterioresArquivo)) {
+            saldosAnterioresArquivo[contaLinha] = col.saldo >= 0 ? arredondarMoeda(row[col.saldo]) : 0;
+          }
+        });
+
         const movimentos = raw.slice(headerIdx + 1).map((row, rowIdx) => {
           const valor = arredondarMoeda(row[col.valor]);
           return {
@@ -1951,7 +1972,7 @@ function lerMovimentosExtratoArquivo(file) {
         }).filter(m => m.data && m.conta && m.valor !== 0);
 
         if (movimentos.length === 0) throw new Error('Nenhum movimento com valor foi encontrado no extrato.');
-        resolve({ arquivo: file.name, planilha: nomePlanilha, movimentos });
+        resolve({ arquivo: file.name, planilha: nomePlanilha, movimentos, saldosAnteriores: saldosAnterioresArquivo });
       } catch (err) {
         reject(new Error(`${file.name}: ${err.message}`));
       }
@@ -1965,6 +1986,11 @@ async function processarExtratosBancarios(files) {
   try {
     const resultados = await Promise.all(files.map(lerMovimentosExtratoArquivo));
     const novosMovimentos = resultados.flatMap(r => r.movimentos);
+    resultados.forEach(r => {
+      Object.entries(r.saldosAnteriores || {}).forEach(([conta, valor]) => {
+        if (!(conta in saldosAnterioresExtratoTemp)) saldosAnterioresExtratoTemp[conta] = valor;
+      });
+    });
     const chavesExistentes = new Map();
     extratoBancarioTemp.forEach(m => {
       const chave = chaveMovimentoExtrato(m);
@@ -2027,6 +2053,7 @@ function mostrarMsgConciliacao(texto, tipo = 'ok') {
 
 function limparExtratoBancario() {
   extratoBancarioTemp = [];
+  saldosAnterioresExtratoTemp = {};
   infoExtratoBancarioTemp = null;
   mostrarPreviewExtrato = false;
   conciliacaoItensTemp = [];
@@ -4509,11 +4536,11 @@ function gerarLancamentos(dados, regras) {
       const semCodigoBanco = !codNumerarioBanco || !codCredito;
       const semCodigoCentro = !codDeparaPrincipal || !codNumerarioCentro;
       if (linhaRateioNegativa) {
-        lancamentosGerados.push({ idx, data: dataLiq, codDebito: codCredito, codCredito: codNumerarioBanco, valorLiq: valorLancamento, valorFmt: fmtValor(valorLancamento), complemento: complementoIntercompany, empresa: empresaBancoRateio, plano, acrescimoDesconto, semCodigo: semCodigoBanco, rateioNegativo: true, tipoRateio: tipoRateioAtual });
-        lancamentosGerados.push({ idx, data: dataLiq, codDebito: codNumerarioCentro, codCredito: codDeparaPrincipal, valorLiq: valorLancamento, valorFmt: fmtValor(valorLancamento), complemento: complementoIntercompany, empresa, plano, acrescimoDesconto, semCodigo: semCodigoCentro, rateioNegativo: true, tipoRateio: tipoRateioAtual });
+        lancamentosGerados.push({ idx, data: dataLiq, codDebito: codCredito, codCredito: codNumerarioBanco, valorLiq: valorLancamento, valorFmt: fmtValor(valorLancamento), complemento: complementoIntercompany, empresa: empresaBancoRateio, plano, acrescimoDesconto, semCodigo: semCodigoBanco, rateioNegativo: true, tipoRateio: tipoRateioAtual, numerarioLado: 'ATIVO' });
+        lancamentosGerados.push({ idx, data: dataLiq, codDebito: codNumerarioCentro, codCredito: codDeparaPrincipal, valorLiq: valorLancamento, valorFmt: fmtValor(valorLancamento), complemento: complementoIntercompany, empresa, plano, acrescimoDesconto, semCodigo: semCodigoCentro, rateioNegativo: true, tipoRateio: tipoRateioAtual, numerarioLado: 'PASSIVO' });
       } else {
-        lancamentosGerados.push({ idx, data: dataLiq, codDebito: codNumerarioBanco, codCredito, valorLiq: valorLancamento, valorFmt: fmtValor(valorLancamento), complemento: complementoIntercompany, empresa: empresaBancoRateio, plano, acrescimoDesconto, semCodigo: semCodigoBanco, tipoRateio: tipoRateioAtual });
-        lancamentosGerados.push({ idx, data: dataLiq, codDebito: codDeparaPrincipal, codCredito: codNumerarioCentro, valorLiq: valorLancamento, valorFmt: fmtValor(valorLancamento), complemento: complementoIntercompany, empresa, plano, acrescimoDesconto, semCodigo: semCodigoCentro, tipoRateio: tipoRateioAtual });
+        lancamentosGerados.push({ idx, data: dataLiq, codDebito: codNumerarioBanco, codCredito, valorLiq: valorLancamento, valorFmt: fmtValor(valorLancamento), complemento: complementoIntercompany, empresa: empresaBancoRateio, plano, acrescimoDesconto, semCodigo: semCodigoBanco, tipoRateio: tipoRateioAtual, numerarioLado: 'ATIVO' });
+        lancamentosGerados.push({ idx, data: dataLiq, codDebito: codDeparaPrincipal, codCredito: codNumerarioCentro, valorLiq: valorLancamento, valorFmt: fmtValor(valorLancamento), complemento: complementoIntercompany, empresa, plano, acrescimoDesconto, semCodigo: semCodigoCentro, tipoRateio: tipoRateioAtual, numerarioLado: 'PASSIVO' });
       }
       return;
     }
@@ -4638,8 +4665,46 @@ function gerarLancamentos(dados, regras) {
 // função de conciliação, de-para ou exportação.
 // ============================================================
 function renderValidacoes() {
+  renderValidacaoSaldosContas();
+  renderValidacaoNumerarios();
+
   const itens = [];
   const semLancamentos = lancamentosGerados.length === 0;
+
+  // 0a) Saldo de banco por conta (extrato é soberano)
+  if (extratoBancarioTemp.length === 0) {
+    itens.push({ titulo: 'Saldo de banco por conta', regra: 'Saldo anterior + entradas − saídas = saldo final, por conta', status: 'pendente', detalhe: 'Nenhum extrato importado nesta sessão.' });
+  } else {
+    const saldos = calcularSaldosPorConta();
+    const comAnterior = saldos.filter(s => s.saldoAnterior !== null);
+    const semAnterior = saldos.filter(s => s.saldoAnterior === null);
+    const divergentes = comAnterior.filter(s => Math.abs(s.diferenca) > 0.01);
+    let status = 'ok';
+    if (divergentes.length > 0) status = 'bloqueio';
+    else if (semAnterior.length > 0) status = 'alerta';
+    itens.push({
+      titulo: 'Saldo de banco por conta',
+      regra: 'Saldo anterior + entradas − saídas = saldo final, por conta',
+      status,
+      detalhe: divergentes.length > 0
+        ? `${divergentes.length} conta(s) não fecham: ${divergentes.map(s => s.conta).join(', ')}.`
+        : (semAnterior.length > 0 ? `${semAnterior.length} conta(s) sem saldo anterior no arquivo — confira acima.` : 'Todas as contas fecham exato.'),
+    });
+  }
+
+  // 0b) Numerários Ativo × Passivo
+  if (semLancamentos) {
+    itens.push({ titulo: 'Numerários Ativo × Passivo', regra: 'Débito 63 = Crédito 1239 (diferença zero)', status: 'pendente', detalhe: '' });
+  } else {
+    const num = calcularNumerarios();
+    const diferenca = arredondarMoeda(num.totalAtivo - num.totalPassivo);
+    itens.push({
+      titulo: 'Numerários Ativo × Passivo',
+      regra: 'Débito 63 = Crédito 1239 (diferença zero)',
+      status: num.qtd === 0 ? 'ok' : (Math.abs(diferenca) <= 0.01 ? 'ok' : 'bloqueio'),
+      detalhe: num.qtd === 0 ? 'Nenhuma transferência de numerário neste lote.' : `Ativo R$ ${fmtValor(num.totalAtivo)} × Passivo R$ ${fmtValor(num.totalPassivo)} — diferença R$ ${fmtValor(diferenca)}.`,
+    });
+  }
 
   // 1) De-Para sem conflitos bloqueantes
   const semCodigo = lancamentosGerados.filter(l => l.semCodigo).length;
@@ -4698,7 +4763,7 @@ function renderValidacoes() {
   const numerario = lancamentosGerados.filter(l => l.tipoRateio === 'TRANSFERENCIA DE NUMERARIOS');
   const numerarioSemCodigo = numerario.filter(l => l.semCodigo).length;
   itens.push({
-    titulo: 'Numerários entre empresas',
+    titulo: 'Numerários — código preenchido',
     regra: 'Pares de transferência com código preenchido dos dois lados',
     status: semLancamentos ? 'pendente' : (numero => numero === 0 ? 'ok' : (numerarioSemCodigo > 0 ? 'bloqueio' : 'ok'))(numerario.length),
     detalhe: semLancamentos ? '' : (numerario.length === 0 ? 'Nenhuma transferência de numerário neste lote.' : `${numerario.length} lançamento(s) de numerário — ${numerarioSemCodigo} sem código.`),
@@ -4743,6 +4808,107 @@ function renderValidacoes() {
       <span class="conciliacao-status ${i.status}">${STATUS_LABEL[i.status]}</span>
     </div>
   `).join('');
+}
+
+// ---------- Saldo de banco/caixa por conta (usa extratoBancarioTemp) ----------
+function calcularSaldosPorConta() {
+  const contas = {};
+  extratoBancarioTemp.forEach(m => {
+    const nomeConta = m.conta || '(sem conta)';
+    if (!contas[nomeConta]) {
+      contas[nomeConta] = { conta: nomeConta, entradas: 0, saidas: 0, qtd: 0, ultimaData: null, saldoFinalDeclarado: null };
+    }
+    const c = contas[nomeConta];
+    c.qtd++;
+    if (m.valor > 0) c.entradas += m.valor; else c.saidas += m.valor;
+    // saldo final declarado = saldo da linha com a data mais recente (desempate: última do array)
+    const dataMov = m.data instanceof Date ? m.data.getTime() : (typeof m.data === 'number' ? m.data : 0);
+    if (c.ultimaData === null || dataMov >= c.ultimaData) {
+      c.ultimaData = dataMov;
+      c.saldoFinalDeclarado = m.saldo;
+    }
+  });
+  return Object.values(contas).map(c => {
+    const saldoAnterior = conta => (conta in saldosAnterioresExtratoTemp) ? saldosAnterioresExtratoTemp[conta] : null;
+    const anterior = saldoAnterior(c.conta);
+    const saldoCalculado = anterior === null ? null : arredondarMoeda(anterior + c.entradas + c.saidas);
+    const diferenca = (saldoCalculado === null || c.saldoFinalDeclarado === null) ? null : arredondarMoeda(saldoCalculado - c.saldoFinalDeclarado);
+    return { ...c, saldoAnterior: anterior, saldoCalculado, diferenca };
+  }).sort((a, b) => a.conta.localeCompare(b.conta));
+}
+
+function renderValidacaoSaldosContas() {
+  const el = document.getElementById('validacao-saldos-contas');
+  if (!el) return;
+  if (extratoBancarioTemp.length === 0) {
+    el.innerHTML = `<div class="empty-state" style="border:1px dashed var(--border);border-radius:var(--radius);padding:20px;text-align:center;color:var(--text2)">Nenhum extrato importado nesta sessão. Importe na tela "Conciliação bancária" para ver o saldo por conta aqui.</div>`;
+    return;
+  }
+  const linhas = calcularSaldosPorConta();
+  el.innerHTML = `<div class="table-wrap">
+    <table>
+      <thead><tr><th>Conta</th><th style="text-align:right">Saldo anterior</th><th style="text-align:right">Entradas</th><th style="text-align:right">Saídas</th><th style="text-align:right">Saldo calculado</th><th style="text-align:right">Saldo final (extrato)</th><th style="text-align:right">Diferença</th></tr></thead>
+      <tbody>${linhas.map(c => {
+        const semAnterior = c.saldoAnterior === null;
+        const bate = c.diferenca !== null && Math.abs(c.diferenca) <= 0.01;
+        const corDif = semAnterior ? 'var(--text2)' : (bate ? '#16a34a' : '#dc2626');
+        return `<tr>
+          <td>${escapeHtml(c.conta)}</td>
+          <td style="text-align:right">${semAnterior ? '<span style="color:var(--text2)">não encontrado no arquivo</span>' : 'R$ ' + fmtValor(c.saldoAnterior)}</td>
+          <td style="text-align:right;color:#166534">R$ ${fmtValor(c.entradas)}</td>
+          <td style="text-align:right;color:#b91c1c">R$ ${fmtValor(c.saidas)}</td>
+          <td style="text-align:right">${semAnterior ? '—' : 'R$ ' + fmtValor(c.saldoCalculado)}</td>
+          <td style="text-align:right">R$ ${fmtValor(c.saldoFinalDeclarado)}</td>
+          <td style="text-align:right;font-weight:700;color:${corDif}">${c.diferenca === null ? '—' : 'R$ ' + fmtValor(c.diferenca)}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>
+  </div>
+  <p class="conciliacao-note" style="margin-top:8px">"Saldo anterior" vem da linha "Saldo anterior" do próprio arquivo de extrato exportado — se não aparecer, o arquivo importado não tinha essa linha para aquela conta.</p>`;
+}
+
+// ---------- Numerários Ativo × Passivo (usa lancamentosGerados) ----------
+function calcularNumerarios() {
+  const linhasNumerario = lancamentosGerados.filter(l => l.tipoRateio === 'TRANSFERENCIA DE NUMERARIOS');
+  const porEmpresa = {};
+  let totalAtivo = 0, totalPassivo = 0;
+  linhasNumerario.forEach(l => {
+    const empresa = l.empresa || '(sem empresa)';
+    if (!porEmpresa[empresa]) porEmpresa[empresa] = { empresa, ativo: 0, passivo: 0 };
+    if (l.numerarioLado === 'ATIVO') { porEmpresa[empresa].ativo += l.valorLiq; totalAtivo += l.valorLiq; }
+    if (l.numerarioLado === 'PASSIVO') { porEmpresa[empresa].passivo += l.valorLiq; totalPassivo += l.valorLiq; }
+  });
+  return {
+    linhas: Object.values(porEmpresa).sort((a, b) => a.empresa.localeCompare(b.empresa)),
+    totalAtivo: arredondarMoeda(totalAtivo),
+    totalPassivo: arredondarMoeda(totalPassivo),
+    qtd: linhasNumerario.length,
+  };
+}
+
+function renderValidacaoNumerarios() {
+  const el = document.getElementById('validacao-numerarios');
+  if (!el) return;
+  if (lancamentosGerados.length === 0) {
+    el.innerHTML = `<div class="empty-state" style="border:1px dashed var(--border);border-radius:var(--radius);padding:20px;text-align:center;color:var(--text2)">Gere os lançamentos primeiro (tela "Lançamentos gerados").</div>`;
+    return;
+  }
+  const r = calcularNumerarios();
+  const diferenca = arredondarMoeda(r.totalAtivo - r.totalPassivo);
+  const bate = Math.abs(diferenca) <= 0.01;
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px">
+      <div class="metric"><div class="metric-label">Total Ativo (63)</div><div class="metric-value">R$ ${fmtValor(r.totalAtivo)}</div></div>
+      <div class="metric"><div class="metric-label">Total Passivo (1239)</div><div class="metric-value">R$ ${fmtValor(r.totalPassivo)}</div></div>
+      <div class="metric"><div class="metric-label">Diferença</div><div class="metric-value ${bate ? 'ok' : 'danger'}">R$ ${fmtValor(diferenca)}</div></div>
+      <div class="metric metric-muted"><div class="metric-label">Lançamentos de numerário</div><div class="metric-value">${r.qtd}</div></div>
+    </div>
+    ${r.linhas.length ? `<div class="table-wrap">
+      <table>
+        <thead><tr><th>Empresa</th><th style="text-align:right">Ativo (débito 63)</th><th style="text-align:right">Passivo (crédito 1239)</th></tr></thead>
+        <tbody>${r.linhas.map(l => `<tr><td>${escapeHtml(l.empresa)}</td><td style="text-align:right">R$ ${fmtValor(l.ativo)}</td><td style="text-align:right">R$ ${fmtValor(l.passivo)}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>` : ''}`;
 }
 
 function montarLinhasDominioPagamentos() {
