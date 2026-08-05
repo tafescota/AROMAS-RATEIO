@@ -902,7 +902,12 @@ async function carregarBaseCompartilhada(mostrarMensagem = false) {
     planoContas = data.planoContas && typeof data.planoContas === 'object' ? data.planoContas : {};
     contasSemConciliacao = data.contasSemConciliacao && typeof data.contasSemConciliacao === 'object' ? data.contasSemConciliacao : {};
     configGrupos = data.configGrupos && typeof data.configGrupos === 'object' ? data.configGrupos : {};
-    percentuaisRateioFixo = data.percentuaisRateioFixo && typeof data.percentuaisRateioFixo === 'object' ? data.percentuaisRateioFixo : {};
+    // Guarda a regra de % contra ser sobrescrita pelo sync automático de 30s
+    // enquanto o usuário está com a tela aberta editando (ainda não salvou).
+    const editandoPercentualFixo = document.querySelector('.tela.active')?.id === 'tela-pagamentos-fixo';
+    if (!editandoPercentualFixo) {
+      percentuaisRateioFixo = data.percentuaisRateioFixo && typeof data.percentuaisRateioFixo === 'object' ? data.percentuaisRateioFixo : {};
+    }
     ultimaSyncLocal = remoteUpdatedAt || Date.now();
     localStorage.setItem(STORAGE_GRUPOS, JSON.stringify(grupos));
     localStorage.setItem(STORAGE_DEPARA, JSON.stringify(depara));
