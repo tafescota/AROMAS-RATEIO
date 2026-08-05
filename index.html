@@ -5307,12 +5307,16 @@ function parseRegraParaTela(chave) {
     };
   }
   if (partes[0] === 'RATEIO NUMERARIOS') {
+    // partes[4] é a natureza (ATIVO/PASSIVO) — sempre visível na coluna Plano de Contas
+    // pra não depender de decorar que "EMPRESA DO BANCO" = Ativo e "CENTRO DE CUSTO" = Passivo.
+    const natureza = partes[4] || '';
     return {
       fornecedor: `Numerários ${partes[1] || ''} x ${partes[2] || ''}`,
-      plano: 'Intercompany rateio',
+      plano: natureza ? `Numerário ${natureza}` : 'Intercompany rateio',
       tipoDoc: partes[3] || 'Numerários',
-      historico: `Conta de numerários para ${partes[1] || ''} x ${partes[2] || ''}`,
-      parcial: false
+      historico: `Conta de numerários ${natureza ? '(' + natureza.toLowerCase() + ') ' : ''}para ${partes[1] || ''} x ${partes[2] || ''}`,
+      parcial: false,
+      natureza
     };
   }
   if (String(partes[0] || '').startsWith('RATEIO:')) {
@@ -5405,7 +5409,9 @@ function renderRegras() {
       return `<tr>
         ${editandoRegras ? `<td><input type="checkbox" data-regra-chave="${escapeAttr(chave)}" ${regrasSelecionadasEdicao.has(chave) ? 'checked' : ''} onchange="alternarRegraSelecionada(this.dataset.regraChave, this.checked)"></td>` : ''}
         <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">${escapeHtml(regra.fornecedor)}</td>
-        <td style="color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${escapeHtml(regra.plano)}</td>
+        <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${regra.natureza
+          ? `<span style="font-weight:700;padding:2px 8px;border-radius:999px;font-size:11px;${regra.natureza === 'ATIVO' ? 'background:#dbeafe;color:#1d4ed8' : 'background:#ffedd5;color:#9a3412'}">${escapeHtml(regra.plano)}</span>`
+          : `<span style="color:var(--text2)">${escapeHtml(regra.plano)}</span>`}</td>
         <td style="color:var(--text2);white-space:nowrap">${escapeHtml(regra.tipoDoc)}</td>
         <td style="color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px">${regra.historico ? escapeHtml(regra.historico) : '<span style="color:var(--text3)">—</span>'}</td>
         <td>${editandoRegras
