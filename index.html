@@ -349,6 +349,44 @@
     </div>
   </div>
 
+  <!-- TELA PAGAMENTOS SEM BANCO (rateio fixo por %) — módulo isolado -->
+  <div class="tela" id="tela-pagamentos-fixo">
+    <div class="section-header">
+      <button class="btn btn-sm" onclick="voltarTela()">← Voltar</button>
+      <h2>Pagamentos sem banco</h2>
+    </div>
+    <div id="msg-pagamentos-fixo"></div>
+    <div class="card" style="margin-bottom:16px">
+      <div class="metric-label" style="margin-bottom:8px">Módulo isolado — não usa extrato/conciliação bancária</div>
+      <p class="conciliacao-note" style="margin-bottom:14px">
+        Importe só a planilha de pagamentos. Linhas que já vêm com Centro de Custo preenchido são tratadas normalmente.
+        Linhas sem Centro de Custo são divididas automaticamente pela regra de % abaixo — cada unidade vira uma linha
+        de rateio própria, com numerário quando a empresa dona do banco for diferente da unidade.
+      </p>
+      <div class="drop-area" id="drop-area-pagamentos-fixo" onclick="document.getElementById('file-input-pagamentos-fixo').click()" ondragover="dragOver(event)" ondragleave="dragLeave(event)" ondrop="onDropPagamentoFixo(event)">
+        <div class="drop-icon">📄</div>
+        <div class="drop-title">Arraste a planilha de pagamentos aqui ou clique para selecionar</div>
+        <div class="drop-sub">Arquivo no padrão Rateio de Título a Pagar (.xlsx, .xlsm ou .xls)</div>
+      </div>
+      <input type="file" id="file-input-pagamentos-fixo" accept=".xlsx,.xlsm,.xls" multiple style="display:none" onchange="onFileChangePagamentoFixo(event)">
+    </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="metric-label" style="margin-bottom:8px">Regra fixa de rateio por %</div>
+      <p class="conciliacao-note" style="margin-bottom:10px">Usada só quando a linha importada não tem Centro de Custo. Fica salva pra esse grupo — todo mundo que acessar o site vê a mesma regra.</p>
+      <div id="tabela-percentuais-fixo"></div>
+      <div class="btn-row" style="margin-top:12px">
+        <button class="btn btn-blue" onclick="salvarPercentuaisRateioFixo()">💾 Salvar regra de %</button>
+      </div>
+    </div>
+
+    <div id="resumo-pagamentos-fixo"></div>
+    <div id="acoes-pagamentos-fixo" style="display:none;gap:10px;flex-wrap:wrap;margin:0 0 16px">
+      <button class="btn btn-blue" onclick="gerarPagamentosFixoComPercentual()">Aplicar % e continuar →</button>
+      <button class="btn" onclick="linhasPagamentoFixoTemp = []; document.getElementById('acoes-pagamentos-fixo').style.display='none'; document.getElementById('resumo-pagamentos-fixo').innerHTML='';">Limpar</button>
+    </div>
+  </div>
+
   <!-- TELA NOVAS CHAVES -->
   <div class="tela" id="tela-novas-chaves">
     <div class="section-header">
@@ -515,6 +553,7 @@ const STORAGE_DEPARA_PROVISAO = 'zip_depara_regras_provisao';
 const STORAGE_PLANO_CONTAS = 'zip_depara_plano_contas';
 const STORAGE_CONTAS_SEM_CONCILIACAO = 'zip_depara_contas_sem_conciliacao';
 const STORAGE_CONFIG_GRUPOS = 'zip_depara_config_grupos';
+const STORAGE_PERCENTUAIS_RATEIO = 'zip_depara_percentuais_rateio_fixo';
 const API_BASE_DEPARA = '/.netlify/functions/depara-base';
 
 let grupos = JSON.parse(localStorage.getItem(STORAGE_GRUPOS) || '[]');
@@ -524,6 +563,9 @@ let deparaProvisao = JSON.parse(localStorage.getItem(STORAGE_DEPARA_PROVISAO) ||
 let planoContas = JSON.parse(localStorage.getItem(STORAGE_PLANO_CONTAS) || '{}');
 let contasSemConciliacao = JSON.parse(localStorage.getItem(STORAGE_CONTAS_SEM_CONCILIACAO) || '{}');
 let configGrupos = JSON.parse(localStorage.getItem(STORAGE_CONFIG_GRUPOS) || '{}');
+// { [grupo]: [{ empresa, percentual }, ...] } — regra fixa de rateio por %, usada só
+// na guia "Pagamentos sem banco" quando a linha não vem com Centro de Custo preenchido.
+let percentuaisRateioFixo = JSON.parse(localStorage.getItem(STORAGE_PERCENTUAIS_RATEIO) || '{}');
 let grupoAtivo = null;
 let linhasImportadas = [];
 let modoImportacaoPagamentos = 'parcelas';
@@ -534,6 +576,7 @@ let selecionadasLote = new Set();
 let filtrosNovasChaves = { empresa: '', centroCusto: '', fornecedor: '', plano: '', historico: '', tipoRateio: '', numero: '', tipoDoc: '', codigo: '' };
 let lancamentosGerados = [];
 let ultimosDadosGerados = []; // usado só pelo painel de validações — não afeta gerarLancamentos
+let linhasPagamentoFixoTemp = []; // linhas cruas importadas na guia "Pagamentos sem banco", antes de expandir por %
 let editandoRegras = false;
 let editTemp = {};
 let regrasSelecionadasEdicao = new Set();
@@ -859,6 +902,7 @@ async function carregarBaseCompartilhada(mostrarMensagem = false) {
     planoContas = data.planoContas && typeof data.planoContas === 'object' ? data.planoContas : {};
     contasSemConciliacao = data.contasSemConciliacao && typeof data.contasSemConciliacao === 'object' ? data.contasSemConciliacao : {};
     configGrupos = data.configGrupos && typeof data.configGrupos === 'object' ? data.configGrupos : {};
+    percentuaisRateioFixo = data.percentuaisRateioFixo && typeof data.percentuaisRateioFixo === 'object' ? data.percentuaisRateioFixo : {};
     ultimaSyncLocal = remoteUpdatedAt || Date.now();
     localStorage.setItem(STORAGE_GRUPOS, JSON.stringify(grupos));
     localStorage.setItem(STORAGE_DEPARA, JSON.stringify(depara));
@@ -867,6 +911,7 @@ async function carregarBaseCompartilhada(mostrarMensagem = false) {
     localStorage.setItem(STORAGE_PLANO_CONTAS, JSON.stringify(planoContas));
     localStorage.setItem(STORAGE_CONTAS_SEM_CONCILIACAO, JSON.stringify(contasSemConciliacao));
     localStorage.setItem(STORAGE_CONFIG_GRUPOS, JSON.stringify(configGrupos));
+    localStorage.setItem(STORAGE_PERCENTUAIS_RATEIO, JSON.stringify(percentuaisRateioFixo));
     if (grupoAtivo && !grupos.includes(grupoAtivo)) grupoAtivo = null;
     renderGrupos();
     atualizarStatusBanco('Base compartilhada do site conectada. Todos usam os mesmos grupos e regras.', 'ok');
@@ -886,7 +931,7 @@ async function salvarBaseCompartilhada(forcar = false) {
   try {
     salvandoBaseCompartilhada = true;
     ultimaSyncLocal = Date.now();
-    const payload = { grupos, depara, deparaRecebimentos, deparaProvisao, planoContas, contasSemConciliacao, configGrupos };
+    const payload = { grupos, depara, deparaRecebimentos, deparaProvisao, planoContas, contasSemConciliacao, configGrupos, percentuaisRateioFixo };
     const resp = await fetch(API_BASE_DEPARA, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -976,6 +1021,7 @@ function mostrarTela(id, registrarHistorico = true) {
   if (id === 'tela-conciliacao-bancaria') renderConciliacaoBancaria();
   if (id === 'tela-resultado') renderResumoConferenciaResultado();
   if (id === 'tela-validacoes') renderValidacoes();
+  if (id === 'tela-pagamentos-fixo') renderPercentuaisRateioFixo();
   if (id === 'tela-provisao-rateio') renderProvisaoRateio();
   if (id === 'tela-importar' && grupoAtivo) {
     document.getElementById('titulo-importar').textContent = 'Importar planilha — ' + grupoAtivo;
@@ -3389,6 +3435,7 @@ function renderGrupos() {
           <button class="btn btn-sm" onclick="mostrarTela('tela-plano-contas')">📑 Plano de Contas</button>
           <button class="btn btn-sm btn-blue" onclick="mostrarTela('tela-importar')">⬆ Importar planilha</button>
           ${modoGrupo === 'rateio' ? `<button class="btn btn-sm" onclick="mostrarTela('tela-provisao-rateio')">Provisão</button>` : ''}
+          ${modoGrupo === 'rateio' ? `<button class="btn btn-sm" onclick="mostrarTela('tela-pagamentos-fixo')">💵 Pagamentos sem banco</button>` : ''}
         ` : ''}
         <button class="btn btn-sm btn-danger" onclick="excluirGrupo('${g}')">🗑</button>
       </div>
@@ -4948,6 +4995,164 @@ function renderValidacaoNumerarios() {
         <tbody>${r.linhas.map(l => `<tr><td>${escapeHtml(l.empresa)}</td><td style="text-align:right">R$ ${fmtValor(l.ativo)}</td><td style="text-align:right">R$ ${fmtValor(l.passivo)}</td></tr>`).join('')}</tbody>
       </table>
     </div>` : ''}`;
+}
+
+// ============================================================
+// PAGAMENTOS SEM BANCO (rateio fixo por %) — módulo isolado.
+// Não toca em gerarLancamentos, prepararPagamentosImportados nem em nenhuma
+// função de conciliação bancária. Só pré-processa linhas antes de entregar
+// pro pipeline normal (mesma "Novas combinações" / mesmo "Gerar lançamentos").
+// ============================================================
+
+function regraPercentualAtual() {
+  if (!grupoAtivo) return [];
+  return (percentuaisRateioFixo[grupoAtivo] || []).slice();
+}
+
+function renderPercentuaisRateioFixo() {
+  const el = document.getElementById('tabela-percentuais-fixo');
+  if (!el) return;
+  const regra = regraPercentualAtual();
+  const total = regra.reduce((s, r) => s + (parseFloat(r.percentual) || 0), 0);
+  const bateTotal = Math.abs(total - 100) <= 0.01;
+  el.innerHTML = `
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Empresa / Unidade</th><th style="width:110px;text-align:right">%</th><th style="width:50px"></th></tr></thead>
+        <tbody>
+          ${regra.length === 0 ? `<tr><td colspan="3" style="text-align:center;color:var(--text2);padding:16px">Nenhuma unidade cadastrada ainda.</td></tr>` : ''}
+          ${regra.map((r, i) => `
+            <tr>
+              <td><input type="text" value="${escapeAttr(r.empresa)}" oninput="editarPercentualFixo(${i}, 'empresa', this.value)" placeholder="ex: 14463 - CACHOEIRA - LOJA" style="width:100%;border:1px solid var(--border);border-radius:4px;padding:5px 8px"></td>
+              <td><input type="number" step="0.01" value="${r.percentual}" oninput="editarPercentualFixo(${i}, 'percentual', this.value)" style="width:90px;text-align:right;border:1px solid var(--border);border-radius:4px;padding:5px 8px"></td>
+              <td><button class="btn btn-sm" onclick="removerPercentualFixo(${i})">🗑</button></td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <button class="btn btn-sm" onclick="adicionarPercentualFixo()">+ Adicionar unidade</button>
+      <span class="conciliacao-status ${bateTotal ? 'ok' : 'warn'}">Total: ${total.toFixed(2)}%${bateTotal ? '' : ' — precisa somar 100%'}</span>
+    </div>`;
+}
+
+function adicionarPercentualFixo() {
+  if (!grupoAtivo) { alert('Selecione um grupo primeiro.'); return; }
+  percentuaisRateioFixo[grupoAtivo] = percentuaisRateioFixo[grupoAtivo] || [];
+  percentuaisRateioFixo[grupoAtivo].push({ empresa: '', percentual: 0 });
+  renderPercentuaisRateioFixo();
+}
+
+function editarPercentualFixo(i, campo, valor) {
+  if (!grupoAtivo || !percentuaisRateioFixo[grupoAtivo]?.[i]) return;
+  percentuaisRateioFixo[grupoAtivo][i][campo] = campo === 'percentual' ? valor : limparTextoECD(valor);
+}
+
+function removerPercentualFixo(i) {
+  if (!grupoAtivo || !percentuaisRateioFixo[grupoAtivo]) return;
+  percentuaisRateioFixo[grupoAtivo].splice(i, 1);
+  renderPercentuaisRateioFixo();
+}
+
+function salvarPercentuaisRateioFixo() {
+  if (!grupoAtivo) return;
+  const regra = regraPercentualAtual();
+  const total = regra.reduce((s, r) => s + (parseFloat(r.percentual) || 0), 0);
+  if (Math.abs(total - 100) > 0.5) {
+    const continuar = confirm(`A soma das porcentagens está em ${total.toFixed(2)}%, não 100%. Salvar mesmo assim? (a regra só é aplicada nas linhas sem Centro de Custo quando somar 100%.)`);
+    if (!continuar) return;
+  }
+  localStorage.setItem(STORAGE_PERCENTUAIS_RATEIO, JSON.stringify(percentuaisRateioFixo));
+  salvarBaseCompartilhada();
+  const msg = document.getElementById('msg-pagamentos-fixo');
+  if (msg) msg.innerHTML = `<div class="alert alert-ok">Regra de % salva para o grupo ${escapeHtml(grupoAtivo)}.</div>`;
+}
+
+// Recebe as linhas cruas (mesmo formato de linhasPlanilhaRateio) e devolve uma
+// nova lista: linhas com Centro de Custo preenchido passam direto; linhas sem
+// Centro de Custo são substituídas por N linhas (uma por unidade da regra),
+// com o valor dividido pela %. A última unidade recebe o resto do arredondamento,
+// pra garantir que a soma bate exatamente com o valor original.
+function expandirPorPercentualFixo(dados, regra) {
+  const total = regra.reduce((s, r) => s + (parseFloat(r.percentual) || 0), 0);
+  const regraValida = regra.length > 0 && Math.abs(total - 100) <= 0.5;
+  const expandido = [];
+  let linhasExpandidas = 0;
+  dados.forEach(linha => {
+    const cc = limparTextoECD(linha[COLS.CC]);
+    if (cc || !regraValida) { expandido.push(linha); return; }
+    const valorOriginal = arredondarMoeda(linha[COLS.VALOR_BRUTO]);
+    if (!valorOriginal) { expandido.push(linha); return; }
+    linhasExpandidas++;
+    let somaAplicada = 0;
+    regra.forEach((r, i) => {
+      const ultima = i === regra.length - 1;
+      const parte = ultima ? arredondarMoeda(valorOriginal - somaAplicada) : arredondarMoeda(valorOriginal * (parseFloat(r.percentual) || 0) / 100);
+      somaAplicada = arredondarMoeda(somaAplicada + parte);
+      if (parte === 0) return;
+      const nova = linha.slice();
+      nova[COLS.CC] = r.empresa;
+      nova[COLS.VALOR_BRUTO] = parte;
+      nova[COLS.VALOR_LIQ] = parte;
+      nova.__rateio = true;
+      nova.__empresaOriginal = linha.__empresaOriginal;
+      nova.__centroCusto = r.empresa;
+      nova.__percentualFixoAplicado = r.percentual;
+      expandido.push(nova);
+    });
+  });
+  return { linhas: expandido, linhasExpandidas };
+}
+
+async function processarArquivoPagamentoFixo(files) {
+  if (!grupoAtivo) { alert('Selecione um grupo antes de importar.'); return; }
+  const msg = document.getElementById('msg-pagamentos-fixo');
+  try {
+    const resultados = await Promise.all(Array.from(files).map(classificarArquivoRateioImportacao));
+    const pagamentos = resultados.filter(r => r.tipo === 'pagamento').flatMap(r => r.dados || []);
+    if (pagamentos.length === 0) {
+      if (msg) msg.innerHTML = `<div class="alert alert-warn">Nenhuma planilha de pagamento reconhecida nesses arquivos.</div>`;
+      return;
+    }
+    linhasPagamentoFixoTemp = pagamentos;
+    const semCC = pagamentos.filter(r => !limparTextoECD(r[COLS.CC])).length;
+    document.getElementById('resumo-pagamentos-fixo').innerHTML = `
+      <div class="card" style="margin-bottom:16px">
+        <div class="metric-label">Importado</div>
+        <p class="conciliacao-note">${pagamentos.length} linha(s) — ${semCC} sem Centro de Custo (vão pela regra de %), ${pagamentos.length - semCC} já rateada(s) (ficam como estão).</p>
+      </div>`;
+    document.getElementById('acoes-pagamentos-fixo').style.display = 'flex';
+    if (msg) msg.innerHTML = '';
+  } catch (err) {
+    if (msg) msg.innerHTML = `<div class="alert alert-warn">Erro ao ler os arquivos: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function onFileChangePagamentoFixo(e) {
+  const files = Array.from(e.target.files || []);
+  if (files.length) processarArquivoPagamentoFixo(files);
+  e.target.value = '';
+}
+
+function onDropPagamentoFixo(e) {
+  e.preventDefault();
+  dragLeave(e);
+  const files = Array.from(e.dataTransfer.files || []);
+  if (files.length) processarArquivoPagamentoFixo(files);
+}
+
+function gerarPagamentosFixoComPercentual() {
+  if (!linhasPagamentoFixoTemp.length) { alert('Importe a planilha de pagamentos primeiro.'); return; }
+  const regra = regraPercentualAtual().filter(r => limparTextoECD(r.empresa) && parseFloat(r.percentual) > 0);
+  const total = regra.reduce((s, r) => s + (parseFloat(r.percentual) || 0), 0);
+  if (regra.length && Math.abs(total - 100) > 0.5) {
+    const continuar = confirm(`A regra de % está somando ${total.toFixed(2)}%, não 100%. As linhas sem Centro de Custo NÃO serão divididas. Continuar mesmo assim?`);
+    if (!continuar) return;
+  }
+  const { linhas, linhasExpandidas } = expandirPorPercentualFixo(linhasPagamentoFixoTemp, regra);
+  linhasImportadasModo = 'rateio';
+  prepararPagamentosImportados(linhas, true);
+  if (linhasExpandidas > 0) showMsg(`${linhasExpandidas} pagamento(s) sem Centro de Custo foram divididos pela regra de %.`, 'ok');
 }
 
 function montarLinhasDominioPagamentos() {
