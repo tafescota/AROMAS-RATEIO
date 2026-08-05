@@ -5089,11 +5089,21 @@ function salvarPercentuaisRateioFixo() {
   if (msg) msg.innerHTML = `<div class="alert alert-ok">Regra de % salva para o grupo ${escapeHtml(grupoAtivo)}.</div>`;
 }
 
+// "ADM CENTRAL" (ou nome equivalente) é usado pela origem dos dados como valor-padrão
+// quando o título não tem um centro de custo real definido — não é um centro de custo
+// de verdade, é um "não sei pra quem ratear". Por isso conta como "sem Centro de Custo"
+// pra fins da regra de %, igual ao campo realmente vazio.
+function ehCentroCustoPlaceholder(cc) {
+  const ccNorm = normalizarTexto(cc);
+  return !ccNorm || ccNorm.includes('adm central');
+}
+
 // Recebe as linhas cruas (mesmo formato de linhasPlanilhaRateio) e devolve uma
-// nova lista: linhas com Centro de Custo preenchido passam direto; linhas sem
-// Centro de Custo são substituídas por N linhas (uma por unidade da regra),
-// com o valor dividido pela %. A última unidade recebe o resto do arredondamento,
-// pra garantir que a soma bate exatamente com o valor original.
+// nova lista: linhas com Centro de Custo real preenchido passam direto; linhas sem
+// Centro de Custo real (vazias ou com o placeholder "ADM CENTRAL") são substituídas
+// por N linhas (uma por unidade da regra), com o valor dividido pela %. A última
+// unidade recebe o resto do arredondamento, pra garantir que a soma bate exatamente
+// com o valor original.
 function expandirPorPercentualFixo(dados, regra) {
   const total = regra.reduce((s, r) => s + (parseFloat(r.percentual) || 0), 0);
   const regraValida = regra.length > 0 && Math.abs(total - 100) <= 0.5;
@@ -5101,7 +5111,7 @@ function expandirPorPercentualFixo(dados, regra) {
   let linhasExpandidas = 0;
   dados.forEach(linha => {
     const cc = limparTextoECD(linha[COLS.CC]);
-    if (cc || !regraValida) { expandido.push(linha); return; }
+    if (!ehCentroCustoPlaceholder(cc) || !regraValida) { expandido.push(linha); return; }
     const valorOriginal = arredondarMoeda(linha[COLS.VALOR_BRUTO]);
     if (!valorOriginal) { expandido.push(linha); return; }
     linhasExpandidas++;
@@ -5136,7 +5146,7 @@ async function processarArquivoPagamentoFixo(files) {
       return;
     }
     linhasPagamentoFixoTemp = pagamentos;
-    const semCC = pagamentos.filter(r => !limparTextoECD(r[COLS.CC])).length;
+    const semCC = pagamentos.filter(r => ehCentroCustoPlaceholder(limparTextoECD(r[COLS.CC]))).length;
     document.getElementById('resumo-pagamentos-fixo').innerHTML = `
       <div class="card" style="margin-bottom:16px">
         <div class="metric-label">Importado</div>
