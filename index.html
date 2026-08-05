@@ -4577,7 +4577,13 @@ function gerarLancamentos(dados, regras) {
     const valorLancamento = linhaRateioNegativa ? Math.abs(valorLiq) : valorLiq;
     if (valorLancamento === 0) return;
     const complemento = [forn, tipoDoc, num, plano, historico].filter(Boolean).join(' - ');
-    const complementoIntercompany = [complemento, 'TRANSFERENCIA DE NUMERARIOS'].filter(Boolean).join(' - ');
+    // Linhas vindas da regra fixa de % (Pagamentos sem banco) mostram "RATEIO <unidade> <%>"
+    // no histórico em vez do genérico "TRANSFERENCIA DE NUMERARIOS", pra ficar claro que
+    // aquele valor é uma fatia rateada por %, não uma transferência real entre contas.
+    const sufixoIntercompany = r.__percentualFixoAplicado
+      ? `RATEIO ${centroCustoRateio} ${Number(r.__percentualFixoAplicado).toFixed(2)}%`
+      : 'TRANSFERENCIA DE NUMERARIOS';
+    const complementoIntercompany = [complemento, sufixoIntercompany].filter(Boolean).join(' - ');
     const tipoRateioAtual = tipoRateioLinha(r);
 
     totalLiquido += valorLiq;
