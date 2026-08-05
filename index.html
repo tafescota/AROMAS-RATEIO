@@ -2110,6 +2110,14 @@ function renderPreviewExtratoBancario() {
   </div>`;
 }
 
+// Usado só pelo 5º nível de match (data aproximada) — não afeta dataKey nem os 4 níveis existentes.
+function diferencaDiasConciliacao(a, b) {
+  const da = a instanceof Date ? a : new Date(a);
+  const db = b instanceof Date ? b : new Date(b);
+  if (isNaN(da) || isNaN(db)) return Infinity;
+  return Math.abs(Math.round((da.getTime() - db.getTime()) / 86400000));
+}
+
 function dataKey(v) {
   const texto = fmtDate(v);
   return texto || String(v || '');
@@ -2214,6 +2222,7 @@ function pagamentoConciliacao(row, idx) {
     conta: limparTextoECD(row[COLS.CONTA]),
     meio: limparTextoECD(row[COLS.MEIO_PAG]),
     plano: limparTextoECD(row[COLS.PLANO]),
+    centroCusto: limparTextoECD(row[COLS.CC]),
     historico: infoDoc.historico
   };
 }
@@ -2526,6 +2535,31 @@ function gerarSugestoesConciliacao(opcoes = {}) {
     }
   });
 
+  // 5º nível — isolado dos 4 acima: mesma conta + fornecedor + valor exatos, mas
+  // data de Liquidação até 5 dias de diferença da data real do extrato (lote de
+  // pagamento, fim de semana, feriado, prazo do adquirente). Marca como
+  // "aproximado" (não "provável" nem "conciliado" direto) para revisão.
+  pagamentos.filter(p => !sugestoesPorPagamento.has(p.idx)).forEach(pag => {
+    const candidatos = movimentos
+      .map((mov, idxMov) => ({ mov, idxMov, movTexto: movimentoTextoConciliacao(mov), dias: diferencaDiasConciliacao(pag.data, mov.data) }))
+      .filter(({ mov, idxMov, movTexto, dias }) => !usadosMov.has(idxMov)
+        && mesmaContaConciliacao(pag, mov)
+        && Math.abs(pag.valor - Math.abs(mov.valor)) < 0.01
+        && fornecedorBatePagamentoMovimento(pag, movTexto)
+        && dias > 0 && dias <= 5)
+      .sort((a, b) => a.dias - b.dias);
+    if (candidatos.length >= 1) {
+      const escolhido = candidatos[0];
+      usadosMov.add(escolhido.idxMov);
+      sugestoesPorPagamento.set(pag.idx, {
+        pag, mov: escolhido.mov, idxMov: escolhido.idxMov,
+        status: 'aproximado',
+        regra: `Fornecedor + valor, data ${escolhido.dias}d de diferença`,
+        diferenca: 0
+      });
+    }
+  });
+
   const sugestoes = pagamentos.map(pag => sugestoesPorPagamento.get(pag.idx) || {
     pag,
     mov: null,
@@ -2572,7 +2606,7 @@ function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, ent
     return `<tr class="${classeLinha}">
       <td><span class="badge ${temSugestao ? 'badge-blue' : ''}">Pagamento</span></td>
       <td class="col-secondary" style="white-space:nowrap">${escapeHtml(fmtDate(s.pag.data))}</td>
-      <td>${descTruncada(s.pag.fornecedor || 'Sem fornecedor')}</td>
+      <td>${descTruncada(s.pag.fornecedor || 'Sem fornecedor')}${s.pag.centroCusto ? `<br><span class="muted-line">CC: ${escapeHtml(s.pag.centroCusto)}</span>` : ''}</td>
       <td class="col-value">R$ ${fmtValor(s.pag.valor)}</td>
       <td>${extratoTxt}</td>
       <td><span class="conciliacao-status ${classeStatus}">${escapeHtml(s.status)}</span></td>
