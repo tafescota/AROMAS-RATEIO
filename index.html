@@ -67,7 +67,8 @@
   tr.alt { background: var(--bg2); }
   .table-wrap { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--bg); }
   .table-scroll { overflow-x: auto; }
-  .table-novas-wrap { max-height: calc(100vh - 330px); min-height: 360px; overflow-y: auto; overflow-x: hidden; }
+  .table-novas-wrap.table-scroll { max-height: calc(100vh - 330px); min-height: 360px; overflow-y: auto; overflow-x: hidden !important; }
+  .table-novas-wrap .table-novas { max-width: 100%; }
   .table-novas-wrap thead th { position: sticky; top: 0; z-index: 2; box-shadow: 0 1px 0 var(--border); }
   .table-novas { table-layout: fixed; width: 100%; min-width: 0; font-size: 11.5px; }
   .table-novas th, .table-novas td { padding: 8px 6px; }
@@ -413,6 +414,8 @@
           <option value="">Todos os tipos</option>
           <option value="PROPRIO">Próprio</option>
           <option value="TRANSFERENCIA DE NUMERARIOS">Transferência de numerários</option>
+          <option value="DESCONTO">Desconto</option>
+          <option value="ACRÉSCIMO">Acréscimo</option>
         </select>
         <input type="text" id="codigo-lote" class="conta-autocomplete" placeholder="Conta para aplicar nos selecionados" oninput="criarAutocompleteConta(this)">
         <button class="btn" onclick="selecionarFiltradasEmLote()">Selecionar filtradas</button>
@@ -4470,7 +4473,12 @@ function focarCampoCodigo(campo) {
 
 function valorFiltroNovaChave(item, campo) {
   const infoDoc = separarNumeroDoHistorico(item.tipoDoc, item.numero, item.historico);
-  const tipoRateio = tipoRateioItem(item);
+  // Além de PRÓPRIO/TRANSFERÊNCIA, o filtro de "tipo" também precisa achar as pendências
+  // de ajuste (Desconto/Acréscimo) — que tecnicamente também têm um tipoRateio (PROPRIO ou
+  // TRANSFERENCIA DE NUMERARIOS) por trás, mas o que a Taina quer filtrar aqui é se é um
+  // ajuste de desconto/acréscimo ou não.
+  const infoAjuste = infoAjusteComPonta(item.tipoDoc);
+  const tipoRateio = [tipoRateioItem(item), infoAjuste?.tipo].filter(Boolean).join(' ');
   const valores = {
     empresa: item.empresa || '',
     centroCusto: item.centroCusto || '',
