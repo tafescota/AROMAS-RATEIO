@@ -72,22 +72,24 @@
   .table-novas { table-layout: fixed; width: 100%; min-width: 0; font-size: 11.5px; }
   .table-novas th, .table-novas td { padding: 8px 6px; }
   .table-novas th { white-space: normal; line-height: 1.25; }
-  .table-novas th:nth-child(1) { width: 40px; }
-  .table-novas th:nth-child(2) { width: 9%; }
-  .table-novas th:nth-child(3) { width: 10%; }
-  .table-novas th:nth-child(4) { width: 14%; }
-  .table-novas th:nth-child(5) { width: 13%; }
-  .table-novas th:nth-child(6) { width: 20%; }
-  .table-novas th:nth-child(7) { width: 9%; }
+  .table-novas th:nth-child(1) { width: 30px; }
+  .table-novas th:nth-child(2) { width: 8%; }
+  .table-novas th:nth-child(3) { width: 8%; }
+  .table-novas th:nth-child(4) { width: 6%; }
+  .table-novas th:nth-child(5) { width: 11%; }
+  .table-novas th:nth-child(6) { width: 11%; }
+  .table-novas th:nth-child(7) { width: 18%; }
   .table-novas th:nth-child(8) { width: 7%; }
-  .table-novas th:nth-child(9) { width: 9%; }
-  .table-novas th:nth-child(10) { width: 9%; }
-  .table-novas td { min-height: 56px; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+  .table-novas th:nth-child(9) { width: 6%; }
+  .table-novas th:nth-child(10) { width: 7%; }
+  .table-novas th:nth-child(11) { width: 18%; }
+  .table-novas td { min-height: 56px; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; overflow: hidden; }
   .table-novas td:nth-child(6) { overflow-wrap: normal; word-break: normal; }
   .table-novas td:nth-child(7) { overflow-wrap: normal; word-break: normal; }
   .table-novas td:nth-child(2) { font-weight: 600; color: #111827; }
-  .table-novas td:first-child, .table-novas th:first-child { text-align: center; padding-left: 10px; padding-right: 10px; }
-  .table-novas input[type=text] { height: 34px; min-width: 0; font-size: 12px; padding-left: 8px; padding-right: 8px; }
+  .table-novas td:first-child, .table-novas th:first-child { text-align: center; padding-left: 6px; padding-right: 6px; }
+  .table-novas td:last-child, .table-novas th:last-child { overflow: visible; }
+  .table-novas input[type=text] { height: 34px; min-width: 0; width: 100%; box-sizing: border-box; font-size: 12px; padding-left: 8px; padding-right: 8px; }
   .table-novas td .btn { height: 34px; padding: 0 10px; flex-shrink: 0; }
   .cell-main { color: var(--text); font-weight: 600; }
   .cell-sub { color: var(--text2); font-size: 11px; line-height: 1.35; margin-top: 3px; }
@@ -98,7 +100,7 @@
   .historico-palavra.ativo { background: var(--blue-bg); color: var(--blue-text); box-shadow: inset 0 0 0 1px var(--blue); }
   .tipo-ajuste-badge { display: inline-block; background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; border-radius: 999px; padding: 3px 9px; font-weight: 700; font-size: 11px; }
   .tipo-ajuste-dc { display: inline-block; min-width: 42px; padding: 3px 8px; font-size: 10px; line-height: 1; white-space: nowrap; }
-  .ajuste-par-inputs { display: grid; grid-template-columns: minmax(0,1fr) 10px minmax(0,1fr); gap: 6px; align-items: center; min-width: 220px; }
+  .ajuste-par-inputs { display: grid; grid-template-columns: minmax(0,1fr) 10px minmax(0,1fr); gap: 4px; align-items: center; width: 100%; min-width: 0; }
   .ajuste-par-field { display: grid; grid-template-columns: 14px minmax(0,1fr); align-items: center; gap: 5px; min-width: 0; }
   .ajuste-par-field span { font-size: 10px; font-weight: 800; color: var(--text2); text-transform: uppercase; letter-spacing: .04em; }
   .ajuste-par-field input.conta-autocomplete { width: 100%; min-width: 0; height: 32px; padding: 0 8px; box-sizing: border-box; }
