@@ -84,9 +84,10 @@
   .table-novas th:nth-child(9) { width: 6%; }
   .table-novas th:nth-child(10) { width: 6%; }
   .table-novas th:nth-child(11) { width: 16%; }
-  .table-novas td { min-height: 56px; white-space: normal; overflow-wrap: anywhere; line-height: 1.35; overflow: hidden; }
-  .table-novas td:nth-child(6) { overflow-wrap: normal; word-break: normal; }
-  .table-novas td:nth-child(7) { overflow-wrap: normal; word-break: normal; }
+  /* overflow-wrap:anywhere em TODAS as células (mesmo com palavra longa sem espaço, tipo um
+     nome comprido de plano de contas) é obrigatório pra table-layout:fixed não jogar fora a
+     largura definida — uma palavra grande demais força a tabela inteira a esticar senão. */
+  .table-novas td { min-height: 56px; white-space: normal; overflow-wrap: anywhere; word-break: break-word; line-height: 1.35; overflow: hidden; }
   .table-novas td:nth-child(2) { font-weight: 600; color: #111827; }
   .table-novas td:first-child, .table-novas th:first-child { text-align: center; padding-left: 6px; padding-right: 6px; }
   .table-novas td:last-child, .table-novas th:last-child { overflow: visible; }
