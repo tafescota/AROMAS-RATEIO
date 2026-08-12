@@ -17,6 +17,7 @@ const baseVazia = {
   contasSemConciliacao: {},
   configGrupos: {},
   percentuaisRateioFixo: {},
+  vinculosConciliacaoSalvos: {},
   updatedAt: null,
 };
 
