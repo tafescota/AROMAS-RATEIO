@@ -1821,7 +1821,7 @@ function renderConciliacaoBancaria() {
             </div>
           </div>`
         : '';
-  el.innerHTML = htmlResumoConferenciaBancaria() + acaoConciliacao;
+  el.innerHTML = htmlResumoConferenciaBancaria() + renderDeParaContasFinanceiras() + acaoConciliacao;
   const blocoRateio = document.getElementById('bloco-recebimentos-rateio');
   if (blocoRateio) blocoRateio.style.display = 'none';
   renderResumoRecebimentosRateio();
@@ -2352,11 +2352,59 @@ function contasExtrato(movimentos = extratoBancarioTemp) {
   return [...new Set(movimentos.map(m => limparTextoECD(m.conta)).filter(Boolean))];
 }
 
+function contasEmpresasExtrato(movimentos = extratoBancarioTemp) {
+  const vistos = new Set();
+  const pares = [];
+  movimentos.forEach(m => {
+    const conta = limparTextoECD(m.conta);
+    const empresa = empresaBancoConciliacao({}, m);
+    const chave = normalizarTexto(conta) + '|' + normalizarTexto(empresa);
+    if (!conta || vistos.has(chave)) return;
+    vistos.add(chave);
+    pares.push({ conta, empresa });
+  });
+  return pares;
+}
+
 function resumoContasExtrato(movimentos = extratoBancarioTemp) {
   const contas = contasExtrato(movimentos);
   if (contas.length === 0) return 'Conta não identificada';
   if (contas.length === 1) return contas[0];
   return `${contas.length} contas: ${contas.slice(0, 3).join(', ')}${contas.length > 3 ? '...' : ''}`;
+}
+
+function renderDeParaContasFinanceiras() {
+  const pares = contasEmpresasExtrato();
+  if (pares.length === 0) return '';
+  const linhas = pares.map(({ conta, empresa }) => {
+    const codigo = codigoContaSemConciliacao(conta, empresa);
+    const sugestao = sugestaoContaFinanceiraPadrao(conta, empresa);
+    return `<tr>
+      <td>${escapeHtml(conta)}</td>
+      <td>${escapeHtml(empresa || grupoAtivo || '')}</td>
+      <td>
+        <input type="text"
+          class="conta-autocomplete"
+          data-conta-sem-conciliacao="${escapeAttr(conta)}"
+          data-empresa-sem-conciliacao="${escapeAttr(empresa || '')}"
+          value="${escapeAttr(codigo)}"
+          placeholder="${escapeAttr(sugestao ? `Sugestão: ${sugestao}` : 'Código da conta no Domínio')}"
+          oninput="criarAutocompleteConta(this)"
+          onblur="salvarContaSemConciliacaoInput(this)">
+      </td>
+      <td>${codigo ? '<span class="conciliacao-status ok">salvo</span>' : '<span class="conciliacao-status warn">preencher</span>'}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="card" style="margin-bottom:16px">
+    <h3>De-Para de bancos/caixas por empresa</h3>
+    <p class="conciliacao-note" style="margin-bottom:10px">Informe o código da conta financeira no Domínio para cada combinação de conta do extrato e empresa. A sugestão é apenas um apoio; o valor salvo por empresa prevalece.</p>
+    <div class="table-wrap table-scroll">
+      <table>
+        <thead><tr><th>Conta no extrato</th><th>Empresa</th><th>Código no Domínio</th><th>Status</th></tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    </div>
+  </div>`;
 }
 
 function chaveMovimentoExtrato(m) {
@@ -2647,9 +2695,14 @@ function itensNumerarioRecebimentosRateio(itensRateio) {
   return itens;
 }
 
-function codigoBancoConciliacao(conta) {
+function chaveContaFinanceiraEmpresa(conta, empresa = '') {
+  return normalizarTexto(conta) + ' | ' + normalizarTexto(empresa);
+}
+
+function codigoBancoConciliacao(conta, empresa = '') {
   const contaLimpa = limparTextoECD(conta);
-  return codigoContaSemConciliacao(contaLimpa) || contaLimpa;
+  const empresaLimpa = limparTextoECD(empresa);
+  return codigoContaSemConciliacao(contaLimpa, empresaLimpa);
 }
 
 function empresaBancoConciliacao(item = {}, movimento = {}) {
@@ -3535,8 +3588,8 @@ function montarLinhasRecebimentoRateioDominio(item, codigoRecebimento, regrasNum
   const primeiroMovimento = movimentos[0] || item;
   const valor = Math.abs(arredondarMoeda(item.total || movimentos.reduce((s, mov) => s + Math.abs(mov.valor || 0), 0)));
   if (!valor) return linhas;
-  const banco = codigoBancoConciliacao(item.conta || primeiroMovimento.conta);
   const empresaBanco = empresaBancoConciliacao(item, primeiroMovimento);
+  const banco = codigoBancoConciliacao(item.conta || primeiroMovimento.conta, empresaBanco);
   const centroInformado = limparTextoECD(item.centroCusto || primeiroMovimento.centroCusto || '');
   const centroCusto = centroInformado && normalizarTexto(centroInformado) !== normalizarTexto(grupoAtivo)
     ? centroInformado
@@ -3598,13 +3651,14 @@ function montarLinhasDominioConciliacao({ validarPendencias = true } = {}) {
     movimentos.forEach(mov => {
       const idxMov = extratoBancarioTemp.indexOf(mov);
       if (idxMov >= 0 && transferenciasPareadas.has(idxMov)) return;
+      const empresaBanco = empresaBancoConciliacao(item, mov);
       linhas.push(linhaDominio(
         fmtDate(mov.data || item.data),
-        mov.conta || item.conta || infoExtratoBancarioTemp?.conta || '',
+        codigoBancoConciliacao(mov.conta || item.conta || infoExtratoBancarioTemp?.conta || '', empresaBanco),
         codigo,
         Math.abs(mov.valor || item.total),
         descricaoMovimentoExtrato(mov) || item.historico,
-        empresaBancoConciliacao(item, mov),
+        empresaBanco,
         ''
       ));
     });
@@ -3618,7 +3672,7 @@ function montarLinhasDominioConciliacao({ validarPendencias = true } = {}) {
     linhas.push(linhaDominio(
       fmtDate(mov.data || item.data),
       codigoDebito,
-      codigoBancoConciliacao(mov.conta || item.conta || infoExtratoBancarioTemp?.conta || ''),
+      codigoBancoConciliacao(mov.conta || item.conta || infoExtratoBancarioTemp?.conta || '', empresaBancoConciliacao(item, mov)),
       Math.abs(mov.valor || item.total),
       descricaoMovimentoExtrato(mov) || item.historico,
       empresaBancoConciliacao(item, mov),
@@ -4121,12 +4175,25 @@ function obterCodigoContaParaDominio(valor) {
   return conta ? String(conta.codigo || '').trim() : texto;
 }
 
-function codigoContaSemConciliacao(conta) {
+function sugestaoContaFinanceiraPadrao(conta, empresa = '') {
+  const contaNorm = normalizarTexto(conta);
+  const empresaNorm = normalizarTexto(empresa);
+  if (!contaNorm) return '';
+  if (contaNorm.includes('aplicacao bradesco') && empresaNorm.includes('cachoeira')) return '11';
+  if (contaNorm.includes('bradesco') && empresaNorm.includes('cachoeira')) return '8';
+  if ((contaNorm.includes('caixa loja') || contaNorm.includes('caixa vd') || contaNorm.includes('conta cofre')) && empresaNorm) return '5';
+  return '';
+}
+
+function codigoContaSemConciliacao(conta, empresa = '') {
   const texto = limparTextoECD(conta);
   if (!texto || !grupoAtivo) return '';
   const chaveNormalizada = normalizarTexto(texto);
+  const empresaLimpa = limparTextoECD(empresa);
+  const chaveEmpresa = chaveContaFinanceiraEmpresa(texto, empresaLimpa);
   const regrasGrupo = contasSemConciliacao[grupoAtivo] || {};
-  const valor = regrasGrupo[texto]
+  const valor = regrasGrupo[chaveEmpresa]
+    || regrasGrupo[texto]
     || regrasGrupo[chaveNormalizada]
     || contasSemConciliacao[texto]
     || contasSemConciliacao[chaveNormalizada]
@@ -4137,10 +4204,10 @@ function codigoContaSemConciliacao(conta) {
 function salvarContaSemConciliacaoInput(input) {
   if (!input?.dataset?.contaSemConciliacao || !grupoAtivo) return;
   const conta = limparTextoECD(input.dataset.contaSemConciliacao);
+  const empresa = limparTextoECD(input.dataset.empresaSemConciliacao || '');
   const codigo = obterCodigoContaParaDominio(input.value);
   contasSemConciliacao[grupoAtivo] = contasSemConciliacao[grupoAtivo] || {};
-  contasSemConciliacao[grupoAtivo][conta] = codigo;
-  contasSemConciliacao[grupoAtivo][normalizarTexto(conta)] = codigo;
+  contasSemConciliacao[grupoAtivo][chaveContaFinanceiraEmpresa(conta, empresa)] = codigo;
   input.value = codigo;
   salvarStorage();
 }
@@ -4848,7 +4915,6 @@ function gerarLancamentos(dados, regras) {
     const codDeparaPrincipal = obterCodigoContaParaDominio(encontrarCodigoRegra(regras, forn, plano, tipoDoc, historico, escopoRegra));
     let codDebito = codDeparaPrincipal;
     const banco = limparTextoECD(r[COLS.CONTA]);
-    let codCredito = codigoContaSemConciliacao(banco) || banco;
     const valorBruto = arredondarMoeda(r[COLS.VALOR_BRUTO]);
     const valorLiq = arredondarMoeda(r[COLS.VALOR_LIQ]);
     const acrescimoDesconto = arredondarMoeda(r[COLS.ACRESCIMO]);
@@ -4856,6 +4922,8 @@ function gerarLancamentos(dados, regras) {
     const num = infoDoc.numero;
     const empresa = empresaLancamentoLinha(r);
     const empresaBancoRateio = empresaOrigemLinha(r);
+    let codCredito = codigoContaSemConciliacao(banco, empresaBancoRateio);
+    if (!codCredito) pendentes.add(`CONTA FINANCEIRA | ${banco} | ${empresaBancoRateio}`);
     const centroCustoRateio = centroCustoLinha(r);
     const linhaRateioNegativa = !!r.__rateio && valorLiq < 0;
     const intercompanyRateio = rateioIntercompanyLinha(r);
@@ -5501,12 +5569,25 @@ function montarLinhasDominioPagamentos() {
   ]);
 }
 
+function bloquearExportacaoComContasVazias(linhas) {
+  const faltantes = linhas
+    .map((linha, idx) => ({ idx: idx + 2, debito: limparTextoECD(linha[1]), credito: limparTextoECD(linha[2]), valor: linha[3], historico: linha[5], empresa: linha[7] }))
+    .filter(l => !l.debito || !l.credito);
+  if (faltantes.length === 0) return false;
+  const exemplos = faltantes.slice(0, 5).map(l =>
+    `Linha ${l.idx}: ${l.empresa || 'sem empresa'} - R$ ${fmtValor(l.valor)} - ${l.historico || ''}`
+  ).join('\n');
+  alert(`${faltantes.length} lançamento(s) sem conta de débito ou crédito. Preencha o De-Para de bancos/caixas por empresa e as pendências antes de exportar.\n\n${exemplos}`);
+  return true;
+}
+
 function exportarDominioPagamentos() {
   const linhas = montarLinhasDominioPagamentos();
   if (linhas.length === 0) {
     alert('Gere os lançamentos antes de exportar.');
     return;
   }
+  if (bloquearExportacaoComContasVazias(linhas)) return;
   linhas[0][6] = 1;
   const ws = XLSX.utils.aoa_to_sheet([CABECALHO_DOMINIO, ...linhas]);
   const wb = XLSX.utils.book_new();
@@ -5525,6 +5606,7 @@ function exportarDominioFinal() {
   if (linhasConciliacao === null) return;
 
   const linhas = [...linhasPagamentos, ...linhasConciliacao];
+  if (bloquearExportacaoComContasVazias(linhas)) return;
   linhas.forEach(l => { l[6] = ''; });
   if (linhas.length > 0) linhas[0][6] = 1;
 
@@ -5828,17 +5910,6 @@ iniciarSincronizacaoAutomatica();
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
 
 
 
