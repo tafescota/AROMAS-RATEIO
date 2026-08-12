@@ -22,3 +22,124 @@
     font-size: 12px;
   }
 }
+
+#modal-pendencias-conciliacao {
+  overflow: hidden;
+}
+
+#modal-pendencias-conciliacao > div {
+  min-width: 0;
+}
+
+.pendencias-modal-toolbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(180px, 240px) auto auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pendencias-modal-toolbar .btn {
+  justify-content: center;
+}
+
+.pendencias-modal-body {
+  min-width: 0;
+  padding: 14px 20px 16px;
+  overflow: auto;
+}
+
+#modal-pendencias-conciliacao .table-wrap {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.pendencias-conciliacao-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 1180px;
+  font-size: 12px;
+}
+
+.pendencias-conciliacao-table th,
+.pendencias-conciliacao-table td {
+  padding: 8px 9px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: top;
+}
+
+.pendencias-conciliacao-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.pendencias-conciliacao-table th:nth-child(1),
+.pendencias-conciliacao-table td:nth-child(1) {
+  width: 34px;
+  text-align: center;
+}
+
+.pendencias-conciliacao-table th:nth-child(2),
+.pendencias-conciliacao-table td:nth-child(2) {
+  width: 110px;
+}
+
+.pendencias-conciliacao-table th:nth-child(3),
+.pendencias-conciliacao-table td:nth-child(3) {
+  width: 110px;
+}
+
+.pendencias-conciliacao-table th:nth-child(4),
+.pendencias-conciliacao-table td:nth-child(4),
+.pendencias-conciliacao-table th:nth-child(5),
+.pendencias-conciliacao-table td:nth-child(5) {
+  width: 130px;
+}
+
+.pendencias-conciliacao-table th:nth-child(6),
+.pendencias-conciliacao-table td:nth-child(6),
+.pendencias-conciliacao-table th:nth-child(7),
+.pendencias-conciliacao-table td:nth-child(7) {
+  width: 160px;
+}
+
+.pendencias-conciliacao-table th:nth-child(8),
+.pendencias-conciliacao-table td:nth-child(8) {
+  width: 220px;
+}
+
+.pendencias-conciliacao-table th:nth-child(9),
+.pendencias-conciliacao-table td:nth-child(9) {
+  width: 105px;
+}
+
+.pendencias-conciliacao-table th:nth-child(10),
+.pendencias-conciliacao-table td:nth-child(10) {
+  width: 105px;
+}
+
+.pendencias-conciliacao-table th:nth-child(11),
+.pendencias-conciliacao-table td:nth-child(11) {
+  width: 140px;
+}
+
+.pendencias-conciliacao-table select,
+.pendencias-conciliacao-table input[type="text"] {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.pendencias-conciliacao-table .badge {
+  max-width: 100%;
+  white-space: normal;
+}
+
+@media (max-width: 900px) {
+  .pendencias-modal-toolbar {
+    grid-template-columns: 1fr;
+  }
+}

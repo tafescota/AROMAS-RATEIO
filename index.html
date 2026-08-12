@@ -2596,6 +2596,56 @@ function empresaBancoConciliacao(item = {}, movimento = {}) {
   return foraDoGrupo || candidatos[0] || grupoAtivo || '';
 }
 
+function movimentoConciliacaoInfo(mov, idxMov) {
+  const valorAbs = Math.abs(arredondarMoeda(mov.valor));
+  return {
+    mov,
+    idxMov,
+    movTexto: movimentoTextoConciliacao(mov),
+    data: dataKey(mov.data),
+    conta: normalizarTexto(mov.conta),
+    doc: String(mov.documento || '').trim(),
+    valorAbs,
+    valorKey: valorAbs.toFixed(2)
+  };
+}
+
+function candidatosMovimentos(infos, pag, opcoes = {}) {
+  const {
+    usadosMov,
+    mesmaData = true,
+    mesmoValor = true,
+    mesmoDoc = false,
+    toleranciaCentavos = false,
+    fornecedor = true,
+    valorMaximo = false,
+    dataAproximada = false,
+    limite = 0
+  } = opcoes;
+  const out = [];
+  for (const info of infos) {
+    if (usadosMov?.has(info.idxMov)) continue;
+    if (!mesmaContaConciliacao(pag, info.mov)) continue;
+    if (mesmaData && pag.dataKey !== info.data) continue;
+    if (mesmoDoc && (!info.doc || pag.numero !== info.doc)) continue;
+    if (mesmoValor && Math.abs(pag.valor - info.valorAbs) >= 0.01) continue;
+    if (toleranciaCentavos) {
+      const diferencaCentavos = Math.abs(arredondarMoeda(pag.valor - info.valorAbs));
+      if (diferencaCentavos < 0.01 || diferencaCentavos > 0.10) continue;
+    }
+    if (valorMaximo && info.valorAbs > pag.valor + 0.01) continue;
+    if (dataAproximada) {
+      const dias = diferencaDiasConciliacao(pag.data, info.mov.data);
+      if (!(dias > 0 && dias <= 5)) continue;
+      info.dias = dias;
+    }
+    if (fornecedor && !fornecedorBatePagamentoMovimento(pag, info.movTexto)) continue;
+    out.push(info);
+    if (limite && out.length >= limite) break;
+  }
+  return out;
+}
+
 function gerarSugestoesConciliacao(opcoes = {}) {
   const { redirecionarSeOk = true } = opcoes;
   const el = document.getElementById('resultado-conciliacao-bancaria');
@@ -2614,6 +2664,7 @@ function gerarSugestoesConciliacao(opcoes = {}) {
   const pagamentos = pagamentosImportadosConciliacao(contasBanco);
   const movimentos = extratoBancarioTemp
     .filter(movimentoEhSaidaConciliavelPagamento);
+  const movimentosInfo = movimentos.map(movimentoConciliacaoInfo);
   const entradas = extratoBancarioTemp.filter((m, idx) => m.valor > 0 && !transferenciasPareadas.has(idx));
   const usadosMov = new Set();
   const sugestoesPorPagamento = new Map();
@@ -2632,17 +2683,7 @@ function gerarSugestoesConciliacao(opcoes = {}) {
 
   pagamentos.forEach(pag => {
     if (sugestoesPorPagamento.has(pag.idx)) return;
-    const candidatos = movimentos
-      .map((mov, idxMov) => ({ mov, idxMov }))
-      .filter(({ mov, idxMov }) => {
-        const doc = String(mov.documento || '').trim();
-        return !usadosMov.has(idxMov)
-          && mesmaContaConciliacao(pag, mov)
-          && doc
-          && pag.numero === doc
-          && pag.dataKey === dataKey(mov.data)
-          && Math.abs(pag.valor - Math.abs(mov.valor)) < 0.01;
-      });
+    const candidatos = candidatosMovimentos(movimentosInfo, pag, { usadosMov, mesmoDoc: true, fornecedor: false });
     if (candidatos.length === 1) {
       usadosMov.add(candidatos[0].idxMov);
       sugestoesPorPagamento.set(pag.idx, { pag, mov: candidatos[0].mov, idxMov: candidatos[0].idxMov, status: 'conciliado', regra: 'Documento + data + valor', diferenca: 0 });
@@ -2651,22 +2692,9 @@ function gerarSugestoesConciliacao(opcoes = {}) {
 
   pagamentos.forEach(pag => {
     if (sugestoesPorPagamento.has(pag.idx)) return;
-    const candidatos = movimentos
-      .map((mov, idxMov) => ({ mov, idxMov, movTexto: movimentoTextoConciliacao(mov) }))
-      .filter(({ mov, idxMov, movTexto }) => {
-        const doc = String(mov.documento || '').trim();
-        const diferencaCentavos = Math.abs(arredondarMoeda(pag.valor - Math.abs(mov.valor)));
-        return !usadosMov.has(idxMov)
-          && mesmaContaConciliacao(pag, mov)
-          && doc
-          && pag.numero === doc
-          && pag.dataKey === dataKey(mov.data)
-          && diferencaCentavos >= 0.01
-          && diferencaCentavos <= 0.10
-          && fornecedorBatePagamentoMovimento(pag, movTexto);
-      });
+    const candidatos = candidatosMovimentos(movimentosInfo, pag, { usadosMov, mesmoDoc: true, mesmoValor: false, toleranciaCentavos: true });
     if (candidatos.length === 1) {
-      const diferenca = arredondarMoeda(pag.valor - Math.abs(candidatos[0].mov.valor));
+      const diferenca = arredondarMoeda(pag.valor - candidatos[0].valorAbs);
       usadosMov.add(candidatos[0].idxMov);
       sugestoesPorPagamento.set(pag.idx, {
         pag,
@@ -2680,13 +2708,7 @@ function gerarSugestoesConciliacao(opcoes = {}) {
   });
 
   pagamentos.filter(p => !sugestoesPorPagamento.has(p.idx)).forEach(pag => {
-    const candidatos = movimentos
-      .map((mov, idxMov) => ({ mov, idxMov, movTexto: movimentoTextoConciliacao(mov) }))
-      .filter(({ mov, idxMov, movTexto }) => !usadosMov.has(idxMov)
-        && mesmaContaConciliacao(pag, mov)
-        && pag.dataKey === dataKey(mov.data)
-        && Math.abs(pag.valor - Math.abs(mov.valor)) < 0.01
-        && fornecedorBatePagamentoMovimento(pag, movTexto));
+    const candidatos = candidatosMovimentos(movimentosInfo, pag, { usadosMov });
     if (candidatos.length === 1) {
       usadosMov.add(candidatos[0].idxMov);
       sugestoesPorPagamento.set(pag.idx, { pag, mov: candidatos[0].mov, idxMov: candidatos[0].idxMov, status: 'provável', regra: 'Fornecedor + data + valor', diferenca: 0 });
@@ -2694,12 +2716,7 @@ function gerarSugestoesConciliacao(opcoes = {}) {
   });
 
   pagamentos.filter(p => !sugestoesPorPagamento.has(p.idx) && pagamentoEhTarifaBancaria(p)).forEach(pag => {
-    const candidatos = movimentos
-      .map((mov, idxMov) => ({ mov, idxMov, movTexto: movimentoTextoConciliacao(mov) }))
-      .filter(({ mov, idxMov, movTexto }) => !usadosMov.has(idxMov)
-        && mesmaContaConciliacao(pag, mov)
-        && Math.abs(pag.valor - Math.abs(mov.valor)) < 0.01
-        && fornecedorBatePagamentoMovimento(pag, movTexto));
+    const candidatos = candidatosMovimentos(movimentosInfo, pag, { usadosMov, mesmaData: false, limite: 1 });
     if (candidatos.length > 0) {
       const escolhido = candidatos[0];
       usadosMov.add(escolhido.idxMov);
@@ -2708,13 +2725,7 @@ function gerarSugestoesConciliacao(opcoes = {}) {
   });
 
   pagamentos.filter(p => !sugestoesPorPagamento.has(p.idx)).forEach(pag => {
-    const candidatos = movimentos
-      .map((mov, idxMov) => ({ mov, idxMov, movTexto: movimentoTextoConciliacao(mov) }))
-      .filter(({ mov, idxMov, movTexto }) => !usadosMov.has(idxMov)
-        && mesmaContaConciliacao(pag, mov)
-        && pag.dataKey === dataKey(mov.data)
-        && fornecedorBatePagamentoMovimento(pag, movTexto)
-        && Math.abs(mov.valor) <= pag.valor + 0.01)
+    const candidatos = candidatosMovimentos(movimentosInfo, pag, { usadosMov, mesmoValor: false, valorMaximo: true })
       .sort((a, b) => Math.abs(b.mov.valor) - Math.abs(a.mov.valor))
       .slice(0, 28);
     const combinacao = encontrarCombinacaoPorValor(candidatos, pag.valor);
@@ -2735,11 +2746,11 @@ function gerarSugestoesConciliacao(opcoes = {}) {
 
   movimentos.forEach((mov, idxMov) => {
     if (usadosMov.has(idxMov)) return;
-    const movTexto = movimentoTextoConciliacao(mov);
+    const info = movimentosInfo[idxMov];
     const candidatos = pagamentos.filter(p => !sugestoesPorPagamento.has(p.idx)
       && mesmaContaConciliacao(p, mov)
       && p.dataKey === dataKey(mov.data)
-      && fornecedorBatePagamentoMovimento(p, movTexto));
+      && fornecedorBatePagamentoMovimento(p, info.movTexto));
     const soma = arredondarMoeda(candidatos.reduce((s, p) => s + p.valor, 0));
     if (candidatos.length > 1 && Math.abs(soma - Math.abs(mov.valor)) < 0.01) {
       usadosMov.add(idxMov);
@@ -2754,13 +2765,7 @@ function gerarSugestoesConciliacao(opcoes = {}) {
   // pagamento, fim de semana, feriado, prazo do adquirente). Marca como
   // "aproximado" (não "provável" nem "conciliado" direto) para revisão.
   pagamentos.filter(p => !sugestoesPorPagamento.has(p.idx)).forEach(pag => {
-    const candidatos = movimentos
-      .map((mov, idxMov) => ({ mov, idxMov, movTexto: movimentoTextoConciliacao(mov), dias: diferencaDiasConciliacao(pag.data, mov.data) }))
-      .filter(({ mov, idxMov, movTexto, dias }) => !usadosMov.has(idxMov)
-        && mesmaContaConciliacao(pag, mov)
-        && Math.abs(pag.valor - Math.abs(mov.valor)) < 0.01
-        && fornecedorBatePagamentoMovimento(pag, movTexto)
-        && dias > 0 && dias <= 5)
+    const candidatos = candidatosMovimentos(movimentosInfo, pag, { usadosMov, mesmaData: false, dataAproximada: true })
       .sort((a, b) => a.dias - b.dias);
     if (candidatos.length >= 1) {
       const escolhido = candidatos[0];
@@ -3119,7 +3124,7 @@ function abrirModalPendenciasConciliacao() {
       return true;
     })
     .filter(item => !filtroPendenciasConciliacaoTemp || textoBuscaPendenciaConciliacao(item).includes(normalizarTexto(filtroPendenciasConciliacaoTemp)));
-  const limitePendencias = filtroPendenciasConciliacaoTemp ? 650 : 280;
+  const limitePendencias = filtroPendenciasConciliacaoTemp ? 220 : 80;
   const itensRenderizados = itensModal.slice(0, limitePendencias);
   const avisoLimitePendencias = itensModal.length > itensRenderizados.length
     ? `<div class="conciliacao-note pendencias-limite-aviso">Mostrando ${itensRenderizados.length} de ${itensModal.length} pendências. Use a pesquisa para localizar itens específicos sem travar a tela.</div>`
@@ -3133,7 +3138,8 @@ function abrirModalPendenciasConciliacao() {
       !selecionadasEmOutros.has(String(saida.idxOriginal))
       && (item.movimento !== 'pagamento-pendente' || !item.conta || !saida.conta || normalizarTexto(item.conta) === normalizarTexto(saida.conta))
     );
-    const mesmasSaidas = saidasDisponiveis.filter(saida => Math.abs(saida.total - item.total) < 0.01);
+    const mesmasSaidasTodas = saidasDisponiveis.filter(saida => Math.abs(saida.total - item.total) < 0.01);
+    const mesmasSaidas = mesmasSaidasTodas.slice(0, 18);
     const saidasCentavos = item.movimento === 'pagamento-pendente'
       ? saidasDisponiveis
         .filter(saida => {
@@ -3143,12 +3149,12 @@ function abrirModalPendenciasConciliacao() {
             && item.data === saida.data
             && (!item.historico || movimentoTextoConciliacao(saida).includes(normalizarTexto(item.historico)));
         })
-        .slice(0, 8)
+        .slice(0, 6)
       : [];
     const idsCentavos = new Set(saidasCentavos.map(saida => String(saida.idxOriginal)));
     const outrasSaidas = saidasDisponiveis
       .filter(saida => Math.abs(saida.total - item.total) >= 0.01 && !idsCentavos.has(String(saida.idxOriginal)))
-      .slice(0, 20);
+      .slice(0, 10);
     const ehNumerarioPendencia = item.movimento === 'numerario-rateio';
     const ehRecebimentoPendencia = item.movimento === 'recebimento';
     const ehSaidaPendente = item.movimento === 'saida-pendente';
@@ -3190,7 +3196,7 @@ function abrirModalPendenciasConciliacao() {
             .join('')}
           </optgroup>
         </select>
-        <div class="conciliacao-note" style="margin-top:4px">${mesmasSaidas.length} opção${mesmasSaidas.length !== 1 ? 'ões' : ''} com o mesmo valor de R$ ${fmtValor(item.total)}${saidasCentavos.length ? ` · ${saidasCentavos.length} provável${saidasCentavos.length !== 1 ? 'is' : ''} com diferença de centavos` : ''}</div>`
+        <div class="conciliacao-note" style="margin-top:4px">${mesmasSaidasTodas.length} opção${mesmasSaidasTodas.length !== 1 ? 'ões' : ''} com o mesmo valor de R$ ${fmtValor(item.total)}${mesmasSaidasTodas.length > mesmasSaidas.length ? ` · mostrando ${mesmasSaidas.length}` : ''}${saidasCentavos.length ? ` · ${saidasCentavos.length} provável${saidasCentavos.length !== 1 ? 'is' : ''} com diferença de centavos` : ''}</div>`
       : `<input type="text" class="conta-autocomplete" data-conciliacao-modal-id="${escapeAttr(item.id)}" value="${escapeAttr(valor)}" placeholder="${escapeAttr(placeholderConta)}" oninput="atualizarCodigoConciliacaoModal(this); criarAutocompleteConta(this)" style="width:100%">`;
     const empresaCol = item.empresaBanco || item.empresa || '';
     const centroCol = item.centroCusto || item.empresaLancamento || '';
@@ -3237,7 +3243,7 @@ function abrirModalPendenciasConciliacao() {
     ? `${qtdSaidasNoModal} saída${qtdSaidasNoModal !== 1 ? 's' : ''} do extrato não encontrou${qtdSaidasNoModal !== 1 ? 'ram' : ''} pagamento correspondente. Preencha a conta de débito para exportar pelo extrato.`
     : 'As saídas pendentes aparecem como opções dos pagamentos.';
   modal.innerHTML = `
-    <div style="background:var(--bg);border-radius:var(--radius);box-shadow:0 16px 48px rgba(0,0,0,0.25);width:min(1960px,calc(100vw - 28px));max-height:90vh;display:flex;flex-direction:column">
+    <div style="background:var(--bg);border-radius:var(--radius);box-shadow:0 16px 48px rgba(0,0,0,0.25);width:min(1500px,calc(100vw - 48px));max-height:90vh;display:flex;flex-direction:column;overflow:hidden">
       <div style="padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px">
         <div>
           <h3 style="margin-bottom:2px">Preencher pendências da conciliação</h3>
@@ -3248,14 +3254,14 @@ function abrirModalPendenciasConciliacao() {
           <button class="btn btn-sm" onclick="fecharModalPendenciasConciliacao()">Fechar</button>
         </div>
       </div>
-      <div style="padding:14px 22px;border-bottom:1px solid var(--border);display:grid;grid-template-columns:minmax(220px,1fr) minmax(180px,240px) auto auto auto;gap:10px;align-items:center">
+      <div class="pendencias-modal-toolbar">
         <input type="search" id="filtro-pendencias-conciliacao" value="${escapeAttr(filtroPendenciasConciliacaoTemp)}" placeholder="Pesquisar empresa, centro, fornecedor, histórico, data, valor..." oninput="atualizarFiltroPendenciasConciliacao(this)">
         <input type="text" id="codigo-lote-conciliacao" class="conta-autocomplete" placeholder="Conta para aplicar nos selecionados" oninput="criarAutocompleteConta(this)">
         <button class="btn btn-sm" onclick="selecionarPendenciasConciliacaoFiltradas()">Selecionar filtradas</button>
         <button class="btn btn-sm" onclick="aplicarContaPendenciasConciliacaoSelecionadas()">Aplicar conta</button>
         <button class="btn btn-sm" onclick="limparSelecaoPendenciasConciliacao()">Limpar seleção</button>
       </div>
-      <div style="padding:16px 22px;overflow:auto">
+      <div class="pendencias-modal-body">
         ${avisoLimitePendencias}
         <div class="table-wrap table-scroll">
           <table class="pendencias-conciliacao-table">
@@ -5746,9 +5752,6 @@ iniciarSincronizacaoAutomatica();
 </script>
 </body>
 </html>
-
-
-
 
 
 
