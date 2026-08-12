@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -75,15 +75,15 @@
   .table-novas th { white-space: normal; line-height: 1.2; font-size: 10px; }
   .table-novas th:nth-child(1) { width: 22px; }
   .table-novas th:nth-child(2) { width: 8%; }
-  .table-novas th:nth-child(3) { width: 9%; }
+  .table-novas th:nth-child(3) { width: 8%; }
   .table-novas th:nth-child(4) { width: 5%; }
-  .table-novas th:nth-child(5) { width: 10%; }
-  .table-novas th:nth-child(6) { width: 10%; }
-  .table-novas th:nth-child(7) { width: 17%; }
+  .table-novas th:nth-child(5) { width: 9%; }
+  .table-novas th:nth-child(6) { width: 9%; }
+  .table-novas th:nth-child(7) { width: 13%; }
   .table-novas th:nth-child(8) { width: 6%; }
   .table-novas th:nth-child(9) { width: 6%; }
   .table-novas th:nth-child(10) { width: 6%; }
-  .table-novas th:nth-child(11) { width: 15%; }
+  .table-novas th:nth-child(11) { width: 22%; }
   /* !important em cascata: qualquer coisa (badge, input, palavra sem espaço) que tentar ficar
      maior que a coluna é forçada a caber — table-layout:fixed só funciona de verdade se nada
      dentro da célula conseguir "empurrar" a largura. */
@@ -239,7 +239,7 @@
 <body>
 
 <div class="topbar">
-  <span class="topbar-logo"><img src="zip-logo-topbar.webp?v=2" alt="Zip Contabilidade" class="topbar-logo-img"></span>
+  <span class="topbar-logo"><img src="zip-logo-topbar.webp?v=2" alt="Zip Contabilidade" class="topbar-logo-img" onerror="this.parentElement.textContent='ZIP'"></span>
   <span class="topbar-sub">Conciliação F360</span>
   <span class="topbar-grupo" id="topbar-grupo" style="display:none"></span>
 </div>
@@ -605,6 +605,8 @@ let extratoBancarioTemp = [];
 let saldosAnterioresExtratoTemp = {}; // { [conta]: valor } — usado só pelo painel de validações
 let infoExtratoBancarioTemp = null;
 let mostrarPreviewExtrato = false;
+let processandoExtratoBancario = false;
+let gerandoConciliacaoBancaria = false;
 let conciliacaoItensTemp = [];
 let codigosConciliacaoTemp = {};
 let vinculosPagamentoConciliacaoTemp = {};
@@ -1756,7 +1758,7 @@ function htmlResumoConferenciaBancaria() {
   const contasBanco = new Set(contasExtrato(extratoBancarioTemp).map(normalizarTexto));
   const pagamentosConciliaveis = pagamentosImportadosConciliacao(contasBanco);
   const saidasPagamentos = extratoBancarioTemp
-    .filter(m => m.valor < 0 && normalizarTexto(m.tipoConciliacao).includes('parcelas de titulos'));
+    .filter(movimentoEhSaidaConciliavelPagamento);
   const totalPagamentos = arredondarMoeda(pagamentosConciliaveis.reduce((s, p) => s + p.valor, 0));
   const totalSaidasPagamentos = arredondarMoeda(Math.abs(saidasPagamentos.reduce((s, m) => s + m.valor, 0)));
   const diferencaConferencia = arredondarMoeda(totalPagamentos - totalSaidasPagamentos);
@@ -1796,7 +1798,23 @@ function renderResumoConferenciaResultado() {
 function renderConciliacaoBancaria() {
   const el = document.getElementById('resumo-conciliacao-bancaria');
   if (!el) return;
-  el.innerHTML = htmlResumoConferenciaBancaria();
+  const podeGerar = linhasImportadas.length > 0 && extratoBancarioTemp.length > 0;
+  const acaoConciliacao = processandoExtratoBancario
+    ? `<div class="alert alert-orange">Importando extrato. Aguarde a leitura terminar antes de iniciar a conciliação.</div>`
+    : gerandoConciliacaoBancaria
+      ? `<div class="alert alert-orange">Gerando conciliação. Esta etapa pode levar alguns segundos em arquivos grandes.</div>`
+      : podeGerar
+        ? `<div class="card" style="margin-bottom:16px;padding:14px 16px">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <div>
+                <strong>Extrato e pagamentos carregados</strong>
+                <div class="conciliacao-note">A importação já terminou. Gere a conciliação quando quiser cruzar os movimentos.</div>
+              </div>
+              <button class="btn btn-primary" onclick="iniciarGeracaoConciliacaoBancaria()">Gerar conciliação</button>
+            </div>
+          </div>`
+        : '';
+  el.innerHTML = htmlResumoConferenciaBancaria() + acaoConciliacao;
   const blocoRateio = document.getElementById('bloco-recebimentos-rateio');
   if (blocoRateio) blocoRateio.style.display = 'none';
   renderResumoRecebimentosRateio();
@@ -2134,6 +2152,14 @@ function lerMovimentosExtratoArquivo(file) {
 }
 
 async function processarExtratosBancarios(files) {
+  if (processandoExtratoBancario) {
+    mostrarMsgConciliacao('Já existe uma importação de extrato em andamento. Aguarde terminar.', 'orange');
+    return;
+  }
+  processandoExtratoBancario = true;
+  mostrarMsgConciliacao(`Importando ${files.length} arquivo${files.length !== 1 ? 's' : ''} de extrato. Aguarde...`, 'orange');
+  renderConciliacaoBancaria();
+  await new Promise(resolve => setTimeout(resolve, 30));
   try {
     const resultados = await Promise.all(files.map(lerMovimentosExtratoArquivo));
     const novosMovimentos = resultados.flatMap(r => r.movimentos);
@@ -2179,16 +2205,14 @@ async function processarExtratosBancarios(files) {
     ];
     if (duplicados > 0) partesMsg.push(`${duplicados} duplicado${duplicados !== 1 ? 's' : ''} ignorado${duplicados !== 1 ? 's' : ''}`);
     if (paresTransferencia > 0) partesMsg.push(`${paresTransferencia} transferência${paresTransferencia !== 1 ? 's' : ''} entre contas identificada${paresTransferencia !== 1 ? 's' : ''}`);
-    mostrarMsgConciliacao(partesMsg.join('. ') + '.', 'ok');
+    const precisaGerar = linhasImportadas.length > 0;
+    mostrarMsgConciliacao(partesMsg.join('. ') + (precisaGerar ? ' Clique em "Gerar conciliação" para cruzar com os pagamentos.' : ' Importe os pagamentos antes de gerar a conciliação.'), 'ok');
     renderConciliacaoBancaria();
-    if (linhasImportadas.length > 0) {
-      const resultado = gerarSugestoesConciliacao();
-      if (resultado?.qtdParaResolver > 0) {
-        setTimeout(() => abrirModalPendenciasConciliacao(), 0);
-      }
-    }
   } catch (err) {
     mostrarMsgConciliacao('Erro ao importar extrato: ' + err.message, 'warn');
+  } finally {
+    processandoExtratoBancario = false;
+    renderConciliacaoBancaria();
   }
 }
 
@@ -2200,6 +2224,38 @@ function mostrarMsgConciliacao(texto, tipo = 'ok') {
   const el = document.getElementById('msg-conciliacao-bancaria');
   if (!el) return;
   el.innerHTML = `<div class="alert alert-${tipo}">${escapeHtml(texto)}</div>`;
+}
+
+function iniciarGeracaoConciliacaoBancaria() {
+  if (gerandoConciliacaoBancaria) return;
+  if (linhasImportadas.length === 0) {
+    mostrarMsgConciliacao('Importe a planilha de pagamentos antes de gerar a conciliação.', 'warn');
+    return;
+  }
+  if (extratoBancarioTemp.length === 0) {
+    mostrarMsgConciliacao('Importe o extrato bancário antes de gerar a conciliação.', 'warn');
+    return;
+  }
+  gerandoConciliacaoBancaria = true;
+  mostrarMsgConciliacao('Gerando conciliação. Aguarde...', 'orange');
+  renderConciliacaoBancaria();
+  setTimeout(() => {
+    try {
+      const resultado = gerarSugestoesConciliacao({ redirecionarSeOk: false });
+      const pendencias = resultado?.qtdParaResolver ?? 0;
+      mostrarMsgConciliacao(
+        pendencias > 0
+          ? `Conciliação gerada com ${pendencias} pendência${pendencias !== 1 ? 's' : ''} para revisar.`
+          : 'Conciliação gerada sem pendências.',
+        pendencias > 0 ? 'orange' : 'ok'
+      );
+    } catch (err) {
+      mostrarMsgConciliacao('Erro ao gerar conciliação: ' + err.message, 'warn');
+    } finally {
+      gerandoConciliacaoBancaria = false;
+      renderConciliacaoBancaria();
+    }
+  }, 50);
 }
 
 function limparExtratoBancario() {
@@ -2322,6 +2378,13 @@ function deduplicarMovimentosExtrato(movimentos) {
 
 function movimentoEhTransferenciaEntreContas(m) {
   return normalizarTexto(m?.tipoConciliacao).includes('transferencia entre contas');
+}
+
+function movimentoEhSaidaConciliavelPagamento(m) {
+  if (!m || !(m.valor < 0) || movimentoEhTransferenciaEntreContas(m)) return false;
+  const tipo = normalizarTexto(m.tipoConciliacao);
+  if (!tipo) return true;
+  return tipo.includes('parcelas de titulos') || tipo.includes('conciliacao mista');
 }
 
 function chaveTransferenciaExtrato(m) {
@@ -2550,7 +2613,7 @@ function gerarSugestoesConciliacao(opcoes = {}) {
   const contasBanco = new Set(contasExtrato(extratoBancarioTemp).map(normalizarTexto));
   const pagamentos = pagamentosImportadosConciliacao(contasBanco);
   const movimentos = extratoBancarioTemp
-    .filter(m => m.valor < 0 && normalizarTexto(m.tipoConciliacao).includes('parcelas de titulos'));
+    .filter(movimentoEhSaidaConciliavelPagamento);
   const entradas = extratoBancarioTemp.filter((m, idx) => m.valor > 0 && !transferenciasPareadas.has(idx));
   const usadosMov = new Set();
   const sugestoesPorPagamento = new Map();
@@ -5683,10 +5746,6 @@ iniciarSincronizacaoAutomatica();
 </script>
 </body>
 </html>
-
-
-
-
 
 
 
