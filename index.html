@@ -511,17 +511,17 @@
   <div class="tela" id="tela-conciliacao-bancaria">
     <div class="section-header">
       <button class="btn btn-sm" onclick="voltarTela()">← Voltar</button>
-      <h2>Conciliação bancária</h2>
+      <h2>Conciliação financeira</h2>
       <button class="btn btn-sm" onclick="mostrarTela('tela-home')">Grupos</button>
     </div>
     <div id="resumo-conciliacao-bancaria"></div>
     <div class="card">
-      <h3>Importar extrato bancário</h3>
+      <h3>Importar extratos financeiros</h3>
       <p class="conciliacao-note" style="margin-bottom:14px">
-        Esta área será usada para cruzar a planilha de pagamentos carregada nesta sessão com o extrato bancário. Os dados do extrato e os vínculos de conciliação serão temporários e não serão salvos na base compartilhada.
+        Esta área será usada para cruzar a planilha de pagamentos carregada nesta sessão com extratos de banco, caixa e aplicação. Os dados dos extratos e os vínculos de conciliação serão temporários e não serão salvos na base compartilhada.
       </p>
-      <button class="btn btn-primary" onclick="document.getElementById('extrato-bancario-input').click()">Importar extrato para conciliação</button>
-      <span style="font-size:12px;color:var(--text2);margin-left:10px">Aceita um ou mais relatórios analíticos de extrato em .xlsx. As sugestões são geradas automaticamente após a importação.</span>
+      <button class="btn btn-primary" onclick="document.getElementById('extrato-bancario-input').click()">Importar extratos para conciliação</button>
+      <span style="font-size:12px;color:var(--text2);margin-left:10px">Aceita um ou mais relatórios analíticos de extrato, inclusive Caixa/Aplicação, em .xlsx. As sugestões são geradas automaticamente após a importação.</span>
       <input type="file" id="extrato-bancario-input" accept=".xlsx,.xls" multiple style="display:none" onchange="onFileChangeExtratoBancario(event)">
       <div id="bloco-recebimentos-rateio" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
         <h4 style="margin:0 0 8px;font-size:14px">Recebimentos por rateio</h4>
@@ -1761,7 +1761,7 @@ function htmlResumoConferenciaBancaria() {
   const qtdPagamentos = linhasImportadas.length;
   const entradas = extratoBancarioTemp.filter(m => m.valor > 0);
   const saidas = extratoBancarioTemp.filter(m => m.valor < 0);
-  const transferenciasPareadas = indicesTransferenciasPareadas(extratoBancarioTemp);
+  const transferencias = extratoBancarioTemp.filter(movimentoEhTransferenciaEntreContas);
   const contasBanco = new Set(contasExtrato(extratoBancarioTemp).map(normalizarTexto));
   const pagamentosConciliaveis = pagamentosImportadosConciliacao(contasBanco);
   const saidasPagamentos = extratoBancarioTemp
@@ -1776,9 +1776,10 @@ function htmlResumoConferenciaBancaria() {
       <div class="metric metric-muted"><div class="metric-label">Grupo ativo</div><div class="metric-value metric-text">${escapeHtml(grupoAtivo || 'Nenhum')}</div></div>
       <div class="metric metric-muted"><div class="metric-label">Pagamentos carregados</div><div class="metric-value">${qtdPagamentos}</div></div>
       <div class="metric ${valoresBatem ? 'metric-focus-ok' : 'metric-focus-warn'}"><div class="metric-label">Conferência</div><div class="metric-value ${valoresBatem ? 'ok' : 'warn'}">${valoresBatem ? 'Bate' : 'Diferença'}</div><div class="metric-sub">R$ ${fmtValor(Math.abs(diferencaConferencia))}</div></div>
-      <div class="metric metric-muted"><div class="metric-label">Extrato bancário</div><div class="metric-value metric-text">${extratoBancarioTemp.length}</div><div class="metric-sub">${infoExtratoBancarioTemp ? escapeHtml(resumoContasExtrato(extratoBancarioTemp)) : 'Não importado'}</div></div>
+      <div class="metric metric-muted"><div class="metric-label">Extratos financeiros</div><div class="metric-value metric-text">${extratoBancarioTemp.length}</div><div class="metric-sub">${infoExtratoBancarioTemp ? escapeHtml(`${resumoTiposExtrato(extratoBancarioTemp)}: ${resumoContasExtrato(extratoBancarioTemp)}`) : 'Não importado'}</div></div>
       <div class="metric metric-muted"><div class="metric-label">Entradas</div><div class="metric-value metric-text">R$ ${fmtValor(entradas.reduce((s, m) => s + m.valor, 0))}</div><div class="metric-sub">${entradas.length} movimentos</div></div>
       <div class="metric metric-muted"><div class="metric-label">Saídas</div><div class="metric-value metric-text">R$ ${fmtValor(Math.abs(saidas.reduce((s, m) => s + m.valor, 0)))}</div><div class="metric-sub">${saidas.length} movimentos</div></div>
+      <div class="metric metric-muted"><div class="metric-label">Só transferência</div><div class="metric-value metric-text">${transferencias.length}</div><div class="metric-sub">caixa/banco/aplicação sem duplicar</div></div>
     </div>
     <div class="alert ${valoresBatem ? 'alert-ok' : 'alert-warn'} conciliacao-check-alert">
       <div class="conciliacao-check-head">
@@ -1807,17 +1808,17 @@ function renderConciliacaoBancaria() {
   if (!el) return;
   const podeGerar = linhasImportadas.length > 0 && extratoBancarioTemp.length > 0;
   const acaoConciliacao = processandoExtratoBancario
-    ? `<div class="alert alert-orange">Importando extrato. Aguarde a leitura terminar antes de iniciar a conciliação.</div>`
+    ? `<div class="alert alert-orange">Importando extratos financeiros. Aguarde a leitura terminar antes de iniciar a conciliação.</div>`
     : gerandoConciliacaoBancaria
       ? `<div class="alert alert-orange">Gerando conciliação. Esta etapa pode levar alguns segundos em arquivos grandes.</div>`
       : podeGerar
         ? `<div class="card" style="margin-bottom:16px;padding:14px 16px">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
               <div>
-                <strong>Extrato e pagamentos carregados</strong>
+                <strong>Extratos financeiros e pagamentos carregados</strong>
                 <div class="conciliacao-note">A importação já terminou. Gere a conciliação quando quiser cruzar os movimentos.</div>
               </div>
-              <button class="btn btn-primary" onclick="iniciarGeracaoConciliacaoBancaria()">Gerar conciliação</button>
+      <button class="btn btn-primary" onclick="iniciarGeracaoConciliacaoBancaria()">Gerar conciliação</button>
             </div>
           </div>`
         : '';
@@ -2164,7 +2165,7 @@ async function processarExtratosBancarios(files) {
     return;
   }
   processandoExtratoBancario = true;
-  mostrarMsgConciliacao(`Importando ${files.length} arquivo${files.length !== 1 ? 's' : ''} de extrato. Aguarde...`, 'orange');
+  mostrarMsgConciliacao(`Importando ${files.length} arquivo${files.length !== 1 ? 's' : ''} de extrato financeiro. Aguarde...`, 'orange');
   renderConciliacaoBancaria();
   await new Promise(resolve => setTimeout(resolve, 30));
   try {
@@ -2203,20 +2204,24 @@ async function processarExtratosBancarios(files) {
       arquivos,
       conta: extratoBancarioTemp[0]?.conta || '',
       contas: contasExtrato(extratoBancarioTemp),
+      tipos: tiposExtrato(extratoBancarioTemp),
       planilha: [...new Set(resultados.map(r => r.planilha).filter(Boolean))].join(', ')
     };
     const paresTransferencia = contarTransferenciasPareadas(extratoBancarioTemp);
+    const transferenciasDetectadas = extratoBancarioTemp.filter(movimentoEhTransferenciaEntreContas).length;
     const partesMsg = [
       `${novosMovimentos.length} movimento${novosMovimentos.length !== 1 ? 's' : ''} importado${novosMovimentos.length !== 1 ? 's' : ''}`,
       `${extratoBancarioTemp.length} movimento${extratoBancarioTemp.length !== 1 ? 's' : ''} na sessão`
     ];
     if (duplicados > 0) partesMsg.push(`${duplicados} duplicado${duplicados !== 1 ? 's' : ''} ignorado${duplicados !== 1 ? 's' : ''}`);
-    if (paresTransferencia > 0) partesMsg.push(`${paresTransferencia} transferência${paresTransferencia !== 1 ? 's' : ''} entre contas identificada${paresTransferencia !== 1 ? 's' : ''}`);
+    if (transferenciasDetectadas > 0) partesMsg.push(`${transferenciasDetectadas} transferência${transferenciasDetectadas !== 1 ? 's' : ''} entre contas protegida${transferenciasDetectadas !== 1 ? 's' : ''} contra duplicidade`);
+    if (paresTransferencia > 0) partesMsg.push(`${paresTransferencia} par${paresTransferencia !== 1 ? 'es' : ''} de transferência batido${paresTransferencia !== 1 ? 's' : ''} por data/valor`);
     const precisaGerar = linhasImportadas.length > 0;
+    partesMsg.push(`${resumoTiposExtrato(extratoBancarioTemp)} detectado${tiposExtrato(extratoBancarioTemp).length > 1 ? 's' : ''}`);
     mostrarMsgConciliacao(partesMsg.join('. ') + (precisaGerar ? ' Clique em "Gerar conciliação" para cruzar com os pagamentos.' : ' Importe os pagamentos antes de gerar a conciliação.'), 'ok');
     renderConciliacaoBancaria();
   } catch (err) {
-    mostrarMsgConciliacao('Erro ao importar extrato: ' + err.message, 'warn');
+    mostrarMsgConciliacao('Erro ao importar extrato financeiro: ' + err.message, 'warn');
   } finally {
     processandoExtratoBancario = false;
     renderConciliacaoBancaria();
@@ -2240,7 +2245,7 @@ function iniciarGeracaoConciliacaoBancaria() {
     return;
   }
   if (extratoBancarioTemp.length === 0) {
-    mostrarMsgConciliacao('Importe o extrato bancário antes de gerar a conciliação.', 'warn');
+    mostrarMsgConciliacao('Importe ao menos um extrato financeiro antes de gerar a conciliação.', 'warn');
     return;
   }
   gerandoConciliacaoBancaria = true;
@@ -2275,7 +2280,7 @@ function limparExtratoBancario() {
   vinculosPagamentoConciliacaoTemp = {};
   trechosRecebimentoConciliacaoTemp = {};
   conciliacaoAplicadaTemp = false;
-  mostrarMsgConciliacao('Extrato removido desta sessão.', 'orange');
+  mostrarMsgConciliacao('Extratos financeiros removidos desta sessão.', 'orange');
   renderConciliacaoBancaria();
 }
 
@@ -2294,8 +2299,8 @@ function renderPreviewExtratoBancario() {
   if (!mostrarPreviewExtrato) {
     el.innerHTML = `<div class="card" style="padding:12px 16px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
-        <div class="conciliacao-note">${extratoBancarioTemp.length} movimentos do extrato importados nesta sessão.</div>
-        <button class="btn btn-sm" onclick="alternarPreviewExtratoBancario()">Mostrar extrato importado</button>
+        <div class="conciliacao-note">${extratoBancarioTemp.length} movimentos de ${escapeHtml(resumoTiposExtrato(extratoBancarioTemp).toLowerCase())} importados nesta sessão.</div>
+        <button class="btn btn-sm" onclick="alternarPreviewExtratoBancario()">Mostrar extratos importados</button>
       </div>
     </div>`;
     return;
@@ -2311,10 +2316,10 @@ function renderPreviewExtratoBancario() {
     </tr>`).join('');
   el.innerHTML = `<div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px">
-      <h3 style="margin-bottom:0">Extrato importado</h3>
-      <button class="btn btn-sm" onclick="alternarPreviewExtratoBancario()">Ocultar extrato</button>
+      <h3 style="margin-bottom:0">Extratos importados</h3>
+      <button class="btn btn-sm" onclick="alternarPreviewExtratoBancario()">Ocultar extratos</button>
     </div>
-    <p class="conciliacao-note" style="margin-bottom:10px">Mostrando até 80 movimentos. Estes dados ficam somente nesta sessão.</p>
+    <p class="conciliacao-note" style="margin-bottom:10px">Mostrando até 80 movimentos de ${escapeHtml(resumoTiposExtrato(extratoBancarioTemp).toLowerCase())}. Estes dados ficam somente nesta sessão.</p>
     <div class="table-wrap table-scroll">
       <table>
         <thead><tr><th>Data</th><th>Conta</th><th style="text-align:right">Valor</th><th>Histórico - Complemento - Tipo</th><th>Documento</th><th>Tipo</th></tr></thead>
@@ -2371,6 +2376,24 @@ function resumoContasExtrato(movimentos = extratoBancarioTemp) {
   if (contas.length === 0) return 'Conta não identificada';
   if (contas.length === 1) return contas[0];
   return `${contas.length} contas: ${contas.slice(0, 3).join(', ')}${contas.length > 3 ? '...' : ''}`;
+}
+
+function tipoContaExtrato(conta) {
+  const texto = normalizarTexto(conta);
+  if (texto.includes('aplicacao')) return 'Aplicação';
+  if (texto.includes('caixa') || texto.includes('cofre')) return 'Caixa';
+  return 'Banco';
+}
+
+function tiposExtrato(movimentos = extratoBancarioTemp) {
+  const ordem = ['Banco', 'Caixa', 'Aplicação'];
+  const tipos = new Set(contasExtrato(movimentos).map(tipoContaExtrato));
+  return ordem.filter(tipo => tipos.has(tipo));
+}
+
+function resumoTiposExtrato(movimentos = extratoBancarioTemp) {
+  const tipos = tiposExtrato(movimentos);
+  return tipos.length ? tipos.join(' + ') : 'Extrato financeiro';
 }
 
 function renderDeParaContasFinanceiras() {
@@ -2496,8 +2519,41 @@ function deduplicarMovimentosExtrato(movimentos) {
   return unicos;
 }
 
+function textoTransferenciaFinanceira(m) {
+  return normalizarTexto([
+    m?.tipoConciliacao,
+    m?.origem,
+    m?.historico,
+    m?.complemento,
+    m?.documento
+  ].filter(Boolean).join(' '));
+}
+
+function movimentoEhRendimentoOuTaxaAplicacao(m) {
+  const texto = textoTransferenciaFinanceira(m);
+  return texto.includes('rendimento')
+    || texto.includes('rendimentos')
+    || texto.includes('juros')
+    || texto.includes('irrf')
+    || texto.includes('iof')
+    || texto.includes('imposto')
+    || texto.includes('tarifa')
+    || texto.includes('taxa');
+}
+
 function movimentoEhTransferenciaEntreContas(m) {
-  return normalizarTexto(m?.tipoConciliacao).includes('transferencia entre contas');
+  const texto = textoTransferenciaFinanceira(m);
+  if (!texto) return false;
+  if (movimentoEhRendimentoOuTaxaAplicacao(m)) return false;
+  return texto.includes('transferencia entre contas')
+    || texto.includes('transferencia entre conta')
+    || texto.includes('transferencia propria')
+    || texto.includes('transf entre contas')
+    || texto.includes('deposito para cc')
+    || texto.includes('deposito para conta corrente')
+    || texto.includes('aplicacao financeira')
+    || texto.includes('resgate aplicacao')
+    || texto.includes('resgate de aplicacao');
 }
 
 function movimentoEhSaidaConciliavelPagamento(m) {
@@ -2505,6 +2561,10 @@ function movimentoEhSaidaConciliavelPagamento(m) {
   const tipo = normalizarTexto(m.tipoConciliacao);
   if (!tipo) return true;
   return tipo.includes('parcelas de titulos') || tipo.includes('conciliacao mista');
+}
+
+function movimentoEhEntradaConciliavelRecebimento(m) {
+  return !!m && m.valor > 0 && !movimentoEhTransferenciaEntreContas(m);
 }
 
 function chaveTransferenciaExtrato(m) {
@@ -2780,7 +2840,7 @@ function gerarSugestoesConciliacao(opcoes = {}) {
     return;
   }
   if (extratoBancarioTemp.length === 0) {
-    el.innerHTML = `<div class="alert alert-warn">Importe o extrato bancário antes de gerar sugestões.</div>`;
+    el.innerHTML = `<div class="alert alert-warn">Importe ao menos um extrato financeiro antes de gerar sugestões.</div>`;
     return;
   }
 
@@ -2791,7 +2851,8 @@ function gerarSugestoesConciliacao(opcoes = {}) {
     .filter(movimentoEhSaidaConciliavelPagamento);
   reaplicarVinculosConciliacaoSalvos(pagamentos, movimentos);
   const movimentosInfo = movimentos.map(movimentoConciliacaoInfo);
-  const entradas = extratoBancarioTemp.filter((m, idx) => m.valor > 0 && !transferenciasPareadas.has(idx));
+  const transferenciasIgnoradas = extratoBancarioTemp.filter(movimentoEhTransferenciaEntreContas);
+  const entradas = extratoBancarioTemp.filter(movimentoEhEntradaConciliavelRecebimento);
   const usadosMov = new Set();
   const sugestoesPorPagamento = new Map();
 
@@ -2917,14 +2978,14 @@ function gerarSugestoesConciliacao(opcoes = {}) {
     .map((mov, idxMov) => ({ mov, idxMov }))
     .filter(item => !usadosMov.has(item.idxMov));
 
-  const resultado = renderSugestoesConciliacao(sugestoes, pagamentos.length, movimentos.length, entradas, saidasExtras);
+  const resultado = renderSugestoesConciliacao(sugestoes, pagamentos.length, movimentos.length, entradas, saidasExtras, transferenciasIgnoradas);
   if (redirecionarSeOk && resultado?.qtdParaResolver === 0) {
     setTimeout(() => mostrarTela('tela-resultado'), 0);
   }
   return resultado;
 }
 
-function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, entradas = [], saidasExtras = []) {
+function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, entradas = [], saidasExtras = [], transferenciasIgnoradas = []) {
   const el = document.getElementById('resultado-conciliacao-bancaria');
   const conciliadas = sugestoes.filter(s => s.mov);
   const semSugestao = sugestoes.length - conciliadas.length;
@@ -3102,13 +3163,14 @@ function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, ent
     <h3>Conciliação e de-para</h3>
     <div class="conciliacao-grid conciliacao-summary-grid">
       <div class="metric metric-muted"><div class="metric-label">Pagamentos analisados</div><div class="metric-value">${qtdPagamentos}</div></div>
-      <div class="metric metric-muted"><div class="metric-label">Saídas do extrato</div><div class="metric-value">${qtdMovimentos}</div></div>
+      <div class="metric metric-muted"><div class="metric-label">Saídas reais do extrato</div><div class="metric-value">${qtdMovimentos}</div></div>
       <div class="metric metric-focus-ok"><div class="metric-label">Pagamentos conciliados</div><div class="metric-value ok">${conciliadas.length}</div></div>
       <div class="metric ${semSugestao > 0 ? 'metric-focus-warn' : 'metric-muted'}"><div class="metric-label">Pagamentos pendentes</div><div class="metric-value ${semSugestao > 0 ? 'warn' : 'ok'}">${semSugestao}</div></div>
       <div class="metric ${saidasExtrasPendentes.length > 0 ? 'metric-focus-warn' : 'metric-muted'}"><div class="metric-label">Saídas pendentes</div><div class="metric-value ${saidasExtrasPendentes.length > 0 ? 'warn' : 'ok'}">${saidasExtrasPendentes.length}</div><div class="metric-sub">${saidasExtrasPreenchidas.length} preenchida${saidasExtrasPreenchidas.length !== 1 ? 's' : ''}</div></div>
+      <div class="metric metric-muted"><div class="metric-label">Transferências entre contas</div><div class="metric-value metric-text">${transferenciasIgnoradas.length}</div><div class="metric-sub">não viram receita/despesa duplicada</div></div>
       ${itensRecebimentoRateio.length ? `<div class="metric metric-muted"><div class="metric-label">Recebimentos rateio</div><div class="metric-value metric-text">${itensRecebimentoRateio.length}</div><div class="metric-sub">${numerariosPendentes.length} numerário${numerariosPendentes.length !== 1 ? 's' : ''} pendente${numerariosPendentes.length !== 1 ? 's' : ''}</div></div>` : ''}
     </div>
-    <p class="conciliacao-note" style="margin-bottom:10px">Pagamentos são validados contra as saídas do extrato. As pendências devem ser conciliadas manualmente quando não houver sugestão automática.</p>
+    <p class="conciliacao-note" style="margin-bottom:10px">Pagamentos são validados contra as saídas reais do extrato. Transferências entre caixa, banco e aplicação são tratadas como troca de conta financeira e não entram como receita/despesa novamente.</p>
     <div class="conciliation-actions">
       ${qtdParaResolver > 0 ? '<button class="btn btn-primary" onclick="abrirModalPendenciasConciliacao()">Preencher pendências</button>' : ''}
       <button class="btn" onclick="mostrarTela('tela-resultado')">Voltar aos lançamentos</button>
@@ -3650,7 +3712,7 @@ function montarLinhasDominioConciliacao({ validarPendencias = true } = {}) {
     const movimentos = item.movimentos && item.movimentos.length ? item.movimentos : [item];
     movimentos.forEach(mov => {
       const idxMov = extratoBancarioTemp.indexOf(mov);
-      if (idxMov >= 0 && transferenciasPareadas.has(idxMov)) return;
+      if (movimentoEhTransferenciaEntreContas(mov) || (idxMov >= 0 && transferenciasPareadas.has(idxMov))) return;
       const empresaBanco = empresaBancoConciliacao(item, mov);
       linhas.push(linhaDominio(
         fmtDate(mov.data || item.data),
@@ -3668,7 +3730,7 @@ function montarLinhasDominioConciliacao({ validarPendencias = true } = {}) {
     if (!codigoDebito) return;
     const mov = extratoBancarioTemp[item.idxOriginal] || item;
     const idxMov = extratoBancarioTemp.indexOf(mov);
-    if (idxMov >= 0 && transferenciasPareadas.has(idxMov)) return;
+    if (movimentoEhTransferenciaEntreContas(mov) || (idxMov >= 0 && transferenciasPareadas.has(idxMov))) return;
     linhas.push(linhaDominio(
       fmtDate(mov.data || item.data),
       codigoDebito,
@@ -5910,19 +5972,6 @@ iniciarSincronizacaoAutomatica();
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
