@@ -626,6 +626,23 @@ let provisaoRateioTemp = [];
 let infoProvisaoRateioTemp = null;
 
 const COLS = { TIPO:0, NUMERO:1, PARCELA:2, EMPRESA:3, FORNECEDOR:4, EMISSAO:5, VENCIMENTO:6, LIQUIDACAO:7, VALOR_BRUTO:8, COMPETENCIA:9, PLANO:10, CC:11, ACRESCIMO:12, VALOR_LIQ:13, CONTA:14, MEIO_PAG:15, TIPO_DOC:16, APROVADA:17, STATUS:18, HISTORICO:19 };
+const TOLERANCIA_CENTAVOS_CONCILIACAO = 0.20;
+
+function statusTituloIgnorado(status) {
+  const texto = normalizarTexto(status);
+  return texto.includes('cancel')
+    || texto.includes('baixad')
+    || texto.includes('estorn')
+    || texto.includes('excluid');
+}
+
+function linhaTituloLiquidadaValida(row) {
+  if (!row) return false;
+  if (!row[COLS.LIQUIDACAO]) return false;
+  if (statusTituloIgnorado(row[COLS.STATUS])) return false;
+  const valor = arredondarMoeda(row[COLS.VALOR_LIQ] || row[COLS.VALOR_BRUTO]);
+  return valor !== 0;
+}
 
 const TIPOS_SEM_HISTORICO = ['nota de débito','nota de debito','nota fiscal de serviço','nota fiscal de servico','nota fiscal'];
 
@@ -1212,8 +1229,9 @@ function linhasPlanilhaTitulos(wb) {
     }
     if (r && String(r[0]||'').toLowerCase() === 'conta a pagar') { inicio = i; break; }
   }
-  const dados = raw.slice(inicio).filter(r => r && r[0] && String(r[0]).trim() !== '');
-  return { dados, nomePlanilha };
+  const linhas = raw.slice(inicio).filter(r => r && r[0] && String(r[0]).trim() !== '');
+  const dados = linhas.filter(linhaTituloLiquidadaValida);
+  return { dados, nomePlanilha, ignoradas: linhas.length - dados.length };
 }
 
 function selecionarModoImportacaoPagamentos(modo) {
@@ -1317,13 +1335,14 @@ function linhasPlanilhaRateio(wb) {
   ['liquidacao', 'valorBruto', 'plano', 'centroCustos', 'conta'].forEach(campo => {
     if (col[campo] < 0) throw new Error(`Não encontrei a coluna obrigatória de rateio: ${campo}.`);
   });
-  const dados = raw.slice(headerIdx + 1)
+  const linhas = raw.slice(headerIdx + 1)
     .filter(r => r && r[col.tipo] && String(r[col.tipo]).trim() !== '')
     // Alguns relatórios terminam com uma linha de soma geral ("Total:", "Total", "Totais")
     // na coluna Tipo, sem fornecedor real — isso não é um título, é um rodapé de somatório.
     .filter(r => !/^totai?s?:?$/i.test(String(r[col.tipo]).trim()) && (col.fornecedor < 0 || r[col.fornecedor]))
     .map(r => normalizarLinhaRateio(r, col));
-  return { dados, nomePlanilha };
+  const dados = linhas.filter(linhaTituloLiquidadaValida);
+  return { dados, nomePlanilha, ignoradas: linhas.length - dados.length };
 }
 
 function linhaProvisaoRateio(r, arquivoOrigem = '') {
@@ -2805,18 +2824,19 @@ function candidatosMovimentos(infos, pag, opcoes = {}) {
     fornecedor = true,
     valorMaximo = false,
     dataAproximada = false,
+    mesmaConta = true,
     limite = 0
   } = opcoes;
   const out = [];
   for (const info of infos) {
     if (usadosMov?.has(info.idxMov)) continue;
-    if (!mesmaContaConciliacao(pag, info.mov)) continue;
+    if (mesmaConta && !mesmaContaConciliacao(pag, info.mov)) continue;
     if (mesmaData && pag.dataKey !== info.data) continue;
     if (mesmoDoc && (!info.doc || pag.numero !== info.doc)) continue;
     if (mesmoValor && Math.abs(pag.valor - info.valorAbs) >= 0.01) continue;
     if (toleranciaCentavos) {
       const diferencaCentavos = Math.abs(arredondarMoeda(pag.valor - info.valorAbs));
-      if (diferencaCentavos < 0.01 || diferencaCentavos > 0.10) continue;
+      if (diferencaCentavos < 0.01 || diferencaCentavos > TOLERANCIA_CENTAVOS_CONCILIACAO) continue;
     }
     if (valorMaximo && info.valorAbs > pag.valor + 0.01) continue;
     if (dataAproximada) {
@@ -2899,6 +2919,30 @@ function gerarSugestoesConciliacao(opcoes = {}) {
     if (candidatos.length === 1) {
       usadosMov.add(candidatos[0].idxMov);
       sugestoesPorPagamento.set(pag.idx, { pag, mov: candidatos[0].mov, idxMov: candidatos[0].idxMov, status: 'provável', regra: 'Fornecedor + data + valor', diferenca: 0 });
+    }
+  });
+
+  pagamentos.filter(p => !sugestoesPorPagamento.has(p.idx)).forEach(pag => {
+    const candidatos = candidatosMovimentos(movimentosInfo, pag, { usadosMov, mesmaConta: false });
+    if (candidatos.length === 1) {
+      usadosMov.add(candidatos[0].idxMov);
+      sugestoesPorPagamento.set(pag.idx, { pag, mov: candidatos[0].mov, idxMov: candidatos[0].idxMov, status: 'provável', regra: 'Fornecedor + data + valor, conta diferente', diferenca: 0 });
+    }
+  });
+
+  pagamentos.filter(p => !sugestoesPorPagamento.has(p.idx)).forEach(pag => {
+    const candidatos = candidatosMovimentos(movimentosInfo, pag, { usadosMov, mesmoValor: false, toleranciaCentavos: true, mesmaConta: false });
+    if (candidatos.length === 1) {
+      const diferenca = arredondarMoeda(pag.valor - candidatos[0].valorAbs);
+      usadosMov.add(candidatos[0].idxMov);
+      sugestoesPorPagamento.set(pag.idx, {
+        pag,
+        mov: candidatos[0].mov,
+        idxMov: candidatos[0].idxMov,
+        status: 'aproximado',
+        regra: `Fornecedor + data + diferença de centavos até R$ ${fmtValor(TOLERANCIA_CENTAVOS_CONCILIACAO)}`,
+        diferenca
+      });
     }
   });
 
@@ -3027,24 +3071,37 @@ function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, ent
   const itensRecebimentoRateio = criarItensRecebimentosRateioAgrupados();
   const itensRecebimento = [...itensRecebimentoExtrato, ...itensRecebimentoRateio];
   const itensNumerarioRateio = itensNumerarioRecebimentosRateio(itensRecebimentoRateio);
-  const itensSaidaExtra = saidasExtras.slice(0, 80).map(({ mov, idxMov }) => ({
-    id: `saida-${idxMov}`,
-    movimento: 'saida-pendente',
-    tipo: mov.tipoConciliacao || 'Saída não conciliada',
-    historico: descricaoMovimentoExtrato(mov) || 'Sem histórico',
-    qtd: 1,
-    total: Math.abs(mov.valor),
-    data: fmtDate(mov.data),
-    conta: mov.conta,
-    empresa: mov.empresa || '',
-    idxMov,
-    idxOriginal: extratoBancarioTemp.indexOf(mov)
-  }));
+  const saidaEhOpcaoDePagamento = mov => pendentesPagamento.some(s => {
+    const valorSaida = Math.abs(arredondarMoeda(mov.valor));
+    const diferenca = Math.abs(arredondarMoeda((s.pag.valor || 0) - valorSaida));
+    return s.pag.dataKey === dataKey(mov.data)
+      && diferenca <= TOLERANCIA_CENTAVOS_CONCILIACAO;
+  });
+  const itensSaidaExtra = saidasExtras.slice(0, 80).map(({ mov, idxMov }) => {
+    const somenteOpcaoVinculo = saidaEhOpcaoDePagamento(mov);
+    return {
+      id: `saida-${idxMov}`,
+      movimento: 'saida-pendente',
+      tipo: mov.tipoConciliacao || 'Saída não conciliada',
+      historico: descricaoMovimentoExtrato(mov) || 'Sem histórico',
+      qtd: 1,
+      total: Math.abs(mov.valor),
+      data: fmtDate(mov.data),
+      conta: mov.conta,
+      empresa: mov.empresa || '',
+      idxMov,
+      idxOriginal: extratoBancarioTemp.indexOf(mov),
+      somenteOpcaoVinculo
+    };
+  });
   const itensPagamentoPendente = sugestoes.filter(s => !s.mov).map(s => ({
     id: `pag-${s.pag.idx}`,
     movimento: 'pagamento-pendente',
-    tipo: 'Pagamento não encontrado',
+    tipo: 'Não encontrado no extrato',
     historico: s.pag.fornecedor || 'Sem fornecedor',
+    fornecedor: s.pag.fornecedor || '',
+    plano: 'Planilha de pagamentos importada',
+    origemImportacao: linhasImportadasModo === 'rateio' ? 'Rateio de Títulos a Pagar' : 'Parcelas de Títulos',
     total: s.pag.valor,
     data: fmtDate(s.pag.data),
     conta: s.pag.conta,
@@ -3063,6 +3120,9 @@ function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, ent
   });
   const saidasExtrasPendentes = itensSaidaExtra.filter(r => !obterCodigoContaParaDominio(codigosConciliacaoTemp[r.id]));
   const saidasExtrasPreenchidas = itensSaidaExtra.filter(r => !!obterCodigoContaParaDominio(codigosConciliacaoTemp[r.id]));
+  const saidasExtrasParaPreencher = itensSaidaExtra.filter(r => !r.somenteOpcaoVinculo);
+  const saidasExtrasPendentesVisiveis = saidasExtrasParaPreencher.filter(r => !obterCodigoContaParaDominio(codigosConciliacaoTemp[r.id]));
+  const saidasExtrasPreenchidasVisiveis = saidasExtrasParaPreencher.filter(r => !!obterCodigoContaParaDominio(codigosConciliacaoTemp[r.id]));
   const entradasPreenchidas = itensRecebimento.filter(r => !!codigosConciliacaoTemp[r.id]);
   const entradasPendentes = itensRecebimento.filter(r => !codigosConciliacaoTemp[r.id]);
   const numerariosPendentes = itensNumerarioRateio.filter(r => !obterCodigoContaParaDominio(codigosConciliacaoTemp[r.id]));
@@ -3128,9 +3188,9 @@ function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, ent
     <td class="col-secondary">${preenchido ? 'Exporta pelo extrato' : 'Informar conta de débito'}</td>
   </tr>`;
   };
-  const linhasSaidasExtrasPendentes = saidasExtrasPendentes.map(r => renderLinhaSaidaExtra(r, false)).join('');
+  const linhasSaidasExtrasPendentes = saidasExtrasPendentesVisiveis.map(r => renderLinhaSaidaExtra(r, false)).join('');
   const linhasSaidasExtrasPreenchidas = mostrarPendenciasPreenchidas
-    ? saidasExtrasPreenchidas.map(r => renderLinhaSaidaExtra(r, true)).join('')
+    ? saidasExtrasPreenchidasVisiveis.map(r => renderLinhaSaidaExtra(r, true)).join('')
     : '';
   const textoBotaoConciliados = mostrarLancamentosConciliados ? 'Recolher lançamentos conciliados' : 'Expandir lançamentos conciliados';
   const secaoConciliados = `<tr>
@@ -3141,9 +3201,9 @@ function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, ent
       </div>
     </td>
   </tr>${mostrarLancamentosConciliados ? linhasConciliadas : ''}`;
-  const pendenciasPreenchidas = entradasPreenchidas.length + saidasExtrasPreenchidas.length;
-  const qtdPendencias = pendentesPagamento.length + itensSaidaExtra.length + itensRecebimento.length;
-  const qtdParaResolver = pendentesPagamento.length + saidasExtrasPendentes.length + entradasPendentes.length + numerariosPendentes.length;
+  const pendenciasPreenchidas = entradasPreenchidas.length + saidasExtrasPreenchidasVisiveis.length;
+  const qtdPendencias = pendentesPagamento.length + saidasExtrasParaPreencher.length + itensRecebimento.length;
+  const qtdParaResolver = pendentesPagamento.length + saidasExtrasPendentesVisiveis.length + entradasPendentes.length + numerariosPendentes.length;
   const textoBotaoPreenchidas = mostrarPendenciasPreenchidas ? 'Recolher pendências preenchidas' : 'Expandir pendências preenchidas';
   const pendenciasOk = qtdParaResolver === 0;
   const secaoPendencias = `<tr>
@@ -3166,7 +3226,7 @@ function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, ent
       <div class="metric metric-muted"><div class="metric-label">Saídas reais do extrato</div><div class="metric-value">${qtdMovimentos}</div></div>
       <div class="metric metric-focus-ok"><div class="metric-label">Pagamentos conciliados</div><div class="metric-value ok">${conciliadas.length}</div></div>
       <div class="metric ${semSugestao > 0 ? 'metric-focus-warn' : 'metric-muted'}"><div class="metric-label">Pagamentos pendentes</div><div class="metric-value ${semSugestao > 0 ? 'warn' : 'ok'}">${semSugestao}</div></div>
-      <div class="metric ${saidasExtrasPendentes.length > 0 ? 'metric-focus-warn' : 'metric-muted'}"><div class="metric-label">Saídas pendentes</div><div class="metric-value ${saidasExtrasPendentes.length > 0 ? 'warn' : 'ok'}">${saidasExtrasPendentes.length}</div><div class="metric-sub">${saidasExtrasPreenchidas.length} preenchida${saidasExtrasPreenchidas.length !== 1 ? 's' : ''}</div></div>
+      <div class="metric ${saidasExtrasPendentesVisiveis.length > 0 ? 'metric-focus-warn' : 'metric-muted'}"><div class="metric-label">Saídas sem pagamento</div><div class="metric-value ${saidasExtrasPendentesVisiveis.length > 0 ? 'warn' : 'ok'}">${saidasExtrasPendentesVisiveis.length}</div><div class="metric-sub">${saidasExtrasPreenchidasVisiveis.length} preenchida${saidasExtrasPreenchidasVisiveis.length !== 1 ? 's' : ''}</div></div>
       <div class="metric metric-muted"><div class="metric-label">Transferências entre contas</div><div class="metric-value metric-text">${transferenciasIgnoradas.length}</div><div class="metric-sub">não viram receita/despesa duplicada</div></div>
       ${itensRecebimentoRateio.length ? `<div class="metric metric-muted"><div class="metric-label">Recebimentos rateio</div><div class="metric-value metric-text">${itensRecebimentoRateio.length}</div><div class="metric-sub">${numerariosPendentes.length} numerário${numerariosPendentes.length !== 1 ? 's' : ''} pendente${numerariosPendentes.length !== 1 ? 's' : ''}</div></div>` : ''}
     </div>
@@ -3217,7 +3277,7 @@ function coletarCodigosConciliacao() {
 }
 
 function labelMovimentoConciliacao(item) {
-  if (item.movimento === 'pagamento-pendente') return 'Pagamento pendente';
+  if (item.movimento === 'pagamento-pendente') return 'Pagamento da planilha';
   if (item.movimento === 'saida-pendente') return 'Saída pendente';
   if (item.movimento === 'recebimento') return item.rateioRecebimento ? 'Recebimento rateio' : 'Recebimento';
   if (item.movimento === 'numerario-rateio') return 'Numerários';
@@ -3305,7 +3365,7 @@ function abrirModalPendenciasConciliacao() {
   const saidasPendentes = conciliacaoItensTemp.filter(item => item.movimento === 'saida-pendente');
   const itensModal = conciliacaoItensTemp
     .filter(item => {
-      if (item.movimento === 'saida-pendente') return !obterCodigoContaParaDominio(codigosConciliacaoTemp[item.id]);
+      if (item.movimento === 'saida-pendente') return !item.somenteOpcaoVinculo && !obterCodigoContaParaDominio(codigosConciliacaoTemp[item.id]);
       if (item.movimento === 'pagamento-pendente') return !vinculosPagamentoConciliacaoTemp[item.id];
       if (item.movimento === 'recebimento') return !obterCodigoContaParaDominio(codigosConciliacaoTemp[item.id]);
       if (item.movimento === 'numerario-rateio') return !obterCodigoContaParaDominio(codigosConciliacaoTemp[item.id]);
@@ -3397,13 +3457,21 @@ function abrirModalPendenciasConciliacao() {
     const fornecedorCol = ehNumerarioPendencia
       ? (item.pontaNumerario === 'EMPRESA DO BANCO' ? 'Numerários da empresa do banco' : 'Numerários do centro de custo')
       : (item.fornecedor || item.descricao || item.historico || '');
-    const planoCol = ehNumerarioPendencia ? contaAlvo : ehSaidaPendente ? 'Pagamento não encontrado' : (item.plano || item.tipo || '');
+    const planoCol = ehNumerarioPendencia
+      ? contaAlvo
+      : ehSaidaPendente
+        ? 'Pagamento não encontrado'
+        : item.movimento === 'pagamento-pendente'
+          ? 'Não encontrado nos extratos importados'
+          : (item.plano || item.tipo || '');
     const orientacaoItem = ehNumerarioPendencia
       ? `Preencha ${contaAlvo}. Não é banco nem cliente.`
       : ehRecebimentoPendencia
         ? 'Preencha a conta do cliente/recebimento. O banco vem do extrato.'
         : ehSaidaPendente
           ? 'Preencha a conta de débito. O crédito será o banco do extrato.'
+          : item.movimento === 'pagamento-pendente'
+            ? 'Vem da planilha de pagamentos importada. O app não encontrou uma saída equivalente nos extratos financeiros carregados.'
         : '';
     const historicoItem = ehRecebimentoPendencia
       ? `<div class="pendencia-orientacao">${escapeHtml(orientacaoItem)}</div><div class="historico-regra-label">Clique nas palavras da regra:</div>${renderPalavrasRecebimentoConciliacao(item)}`
@@ -3411,6 +3479,8 @@ function abrirModalPendenciasConciliacao() {
         ? `<div class="pendencia-orientacao">${escapeHtml(orientacaoItem)}</div><span style="color:var(--text2)">${escapeHtml(item.historico || '')}</span>`
         : ehSaidaPendente
           ? `<div class="pendencia-orientacao">${escapeHtml(orientacaoItem)}</div><span style="color:var(--text2)">${escapeHtml(item.historico || '')}</span>`
+        : item.movimento === 'pagamento-pendente'
+          ? `<div class="pendencia-orientacao">${escapeHtml(orientacaoItem)}</div><span style="color:var(--text2)">${escapeHtml(item.origemImportacao || '')}</span>`
         : `<span style="color:var(--text2)">${escapeHtml(item.historico || '')}</span>`;
     return `<tr>
       <td><input type="checkbox" data-pendencia-conciliacao-id="${escapeAttr(item.id)}" ${pendenciasConciliacaoSelecionadas.has(item.id) ? 'checked' : ''} onchange="alternarPendenciaConciliacao(this.dataset.pendenciaConciliacaoId, this.checked)"></td>
@@ -3687,11 +3757,12 @@ function montarLinhasDominioConciliacao({ validarPendencias = true } = {}) {
     return [];
   }
   const itensRecebimentosNovos = conciliacaoItensTemp.filter(item => item.movimento === 'recebimento');
-  const itensSaidasExtras = conciliacaoItensTemp.filter(item => item.movimento === 'saida-pendente');
+  const itensSaidasExtras = conciliacaoItensTemp.filter(item => item.movimento === 'saida-pendente' && !item.somenteOpcaoVinculo);
   if (itensRecebimentosNovos.length === 0 && itensSaidasExtras.length === 0) {
     return [];
   }
   const pendentes = conciliacaoItensTemp.filter(item => {
+    if (item.movimento === 'saida-pendente' && item.somenteOpcaoVinculo) return false;
     if (item.movimento !== 'recebimento' && item.movimento !== 'numerario-rateio' && item.movimento !== 'saida-pendente') return false;
     return !obterCodigoContaParaDominio(codigosConciliacaoTemp[item.id]);
   });
@@ -4358,7 +4429,7 @@ async function classificarArquivoRateioImportacao(file) {
   }
   try {
     const leituraPagamento = linhasPlanilhaRateio(wb);
-    if (leituraPagamento?.dados?.length) return { tipo: 'pagamento', arquivo: file.name, dados: leituraPagamento.dados };
+    if (leituraPagamento?.dados?.length) return { tipo: 'pagamento', arquivo: file.name, dados: leituraPagamento.dados, ignoradas: leituraPagamento.ignoradas || 0 };
   } catch (errPagamento) {}
   try {
     const recebimento = tentarRecebimento();
@@ -4405,6 +4476,9 @@ async function processarArquivosImportacao(files) {
         }
         linhasImportadasModo = modoImportacaoPagamentos;
         prepararPagamentosImportados(dados, true);
+        if (leitura.ignoradas > 0) {
+          showMsg(`${dados.length} pagamento${dados.length !== 1 ? 's' : ''} liquidado${dados.length !== 1 ? 's' : ''} importado${dados.length !== 1 ? 's' : ''}. ${leitura.ignoradas} linha${leitura.ignoradas !== 1 ? 's' : ''} sem liquidação, cancelada${leitura.ignoradas !== 1 ? 's' : ''}, baixada${leitura.ignoradas !== 1 ? 's' : ''} ou zerada${leitura.ignoradas !== 1 ? 's' : ''} foi${leitura.ignoradas !== 1 ? 'ram' : ''} ignorada${leitura.ignoradas !== 1 ? 's' : ''}.`, 'ok');
+        }
       } catch(err) {
         alert('Erro ao ler o arquivo: ' + err.message);
       }
@@ -4416,6 +4490,7 @@ async function processarArquivosImportacao(files) {
   try {
     const resultados = await Promise.all(files.map(classificarArquivoRateioImportacao));
     const pagamentos = resultados.filter(r => r.tipo === 'pagamento').flatMap(r => r.dados || []);
+    const pagamentosIgnorados = resultados.filter(r => r.tipo === 'pagamento').reduce((s, r) => s + (r.ignoradas || 0), 0);
     const recebimentos = resultados.filter(r => r.tipo === 'recebimento');
     const qtdRecebimentos = recebimentos.length ? adicionarRecebimentosRateio(recebimentos) : 0;
     if (pagamentos.length === 0) {
@@ -4424,7 +4499,12 @@ async function processarArquivosImportacao(files) {
     }
     linhasImportadasModo = 'rateio';
     prepararPagamentosImportados(pagamentos, true);
-    if (qtdRecebimentos > 0) showMsg(`${pagamentos.length} pagamento${pagamentos.length !== 1 ? 's' : ''} e ${qtdRecebimentos} recebimento${qtdRecebimentos !== 1 ? 's' : ''} por rateio importado${qtdRecebimentos !== 1 ? 's' : ''}.`, 'ok');
+    if (qtdRecebimentos > 0 || pagamentosIgnorados > 0) {
+      const partes = [`${pagamentos.length} pagamento${pagamentos.length !== 1 ? 's' : ''}`];
+      if (qtdRecebimentos > 0) partes.push(`${qtdRecebimentos} recebimento${qtdRecebimentos !== 1 ? 's' : ''} por rateio`);
+      if (pagamentosIgnorados > 0) partes.push(`${pagamentosIgnorados} linha${pagamentosIgnorados !== 1 ? 's' : ''} de pagamento ignorada${pagamentosIgnorados !== 1 ? 's' : ''} por status/data/valor`);
+      showMsg(partes.join(' e ') + ' importados.', 'ok');
+    }
   } catch(err) {
     alert('Erro ao ler os arquivos: ' + err.message);
   }
@@ -5972,21 +6052,6 @@ iniciarSincronizacaoAutomatica();
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

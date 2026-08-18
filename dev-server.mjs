@@ -46,7 +46,7 @@ async function handleBase(req, res) {
     try {
       const raw = existsSync(basePath) ? await readFile(basePath, "utf8") : null;
       const data = raw ? JSON.parse(raw) : baseVazia;
-      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" });
       res.end(JSON.stringify({ ...baseVazia, ...data }));
     } catch (err) {
       res.writeHead(500, { "Content-Type": "application/json; charset=utf-8" });
@@ -103,7 +103,10 @@ async function handleStatic(req, res) {
   try {
     const info = await stat(target);
     const file = info.isDirectory() ? join(target, "index.html") : target;
-    res.writeHead(200, { "Content-Type": mime[extname(file).toLowerCase()] || "application/octet-stream" });
+    res.writeHead(200, {
+      "Content-Type": mime[extname(file).toLowerCase()] || "application/octet-stream",
+      "Cache-Control": "no-store",
+    });
     createReadStream(file).pipe(res);
   } catch {
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
