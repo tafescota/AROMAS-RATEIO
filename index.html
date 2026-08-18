@@ -903,7 +903,11 @@ function naturezaNumerarioRecebimento(lado, negativo = false) {
 function codigoNumerarioRateio(regras, empresaBanco, centroCusto, lado, natureza = '') {
   const codigoNovo = obterCodigoContaParaDominio(regras[chaveNumerarioRateio(empresaBanco, centroCusto, lado, natureza)] || '');
   if (codigoNovo) return codigoNovo;
-  return obterCodigoContaParaDominio(regras[chaveNumerarioRateio(empresaBanco, centroCusto, lado)] || '');
+  const codigoLegado = obterCodigoContaParaDominio(regras[chaveNumerarioRateio(empresaBanco, centroCusto, lado)] || '');
+  if (codigoLegado) return codigoLegado;
+  if (natureza === 'ATIVO') return obterCodigoContaParaDominio('63');
+  if (natureza === 'PASSIVO') return obterCodigoContaParaDominio('1239');
+  return '';
 }
 
 function itemNumerarioRateio(empresaBanco, centroCusto, lado, natureza = '') {
@@ -946,7 +950,8 @@ function encontrarCodigoRegra(regras, forn, plano, tipoDoc, historico, escopo = 
     const termos = normalizarTexto(trecho).split(/\s+/).filter(Boolean);
     return termos.length > 0 && termos.every(termo => historicoNormalizado.includes(termo));
   });
-  return achada ? regras[achada] : '';
+  if (achada) return regras[achada];
+  return escopo ? encontrarCodigoRegra(regras, forn, plano, tipoDoc, historico, '') : '';
 }
 
 function encontrarCodigoRegraAjuste(regras, forn, plano, tipoAjuste, ponta, historico, escopo = '') {
