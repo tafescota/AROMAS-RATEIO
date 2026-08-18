@@ -2683,6 +2683,36 @@ function fornecedorBatePagamentoMovimento(pag, movTexto) {
   return termos.some(t => movTexto.includes(t)) || movTexto.includes(pag.fornecedorNorm);
 }
 
+function termosFortesConciliacao(texto) {
+  const ignorar = new Set(['de', 'da', 'do', 'das', 'dos', 'e', 'me', 'ltda', 'sa', 's/a', 'para']);
+  return textoConciliacao(texto)
+    .split(' ')
+    .filter(t => t.length >= 3 && !ignorar.has(t));
+}
+
+function pontuarFornecedorMovimento(pag, movTexto) {
+  const fornecedor = pag?.fornecedorNorm || textoConciliacao(pag?.fornecedor || '');
+  if (!fornecedor || !movTexto) return 0;
+  if (movTexto.includes(fornecedor)) return 1000 + termosFortesConciliacao(fornecedor).length;
+  const termos = termosFortesConciliacao(fornecedor);
+  if (termos.length === 0) return 0;
+  const encontrados = termos.filter(t => movTexto.includes(t));
+  const todos = encontrados.length === termos.length;
+  return encontrados.length * 10 + (todos ? 100 : 0);
+}
+
+function melhorCandidatoPorFornecedor(candidatos, pag, minimo = 20) {
+  if (!candidatos || candidatos.length === 0) return null;
+  const pontuados = candidatos
+    .map(c => ({ ...c, scoreFornecedor: pontuarFornecedorMovimento(pag, c.movTexto || movimentoTextoConciliacao(c.mov)) }))
+    .sort((a, b) => b.scoreFornecedor - a.scoreFornecedor);
+  const melhor = pontuados[0];
+  const segundo = pontuados[1];
+  if (!melhor || melhor.scoreFornecedor < minimo) return null;
+  if (segundo && segundo.scoreFornecedor === melhor.scoreFornecedor) return null;
+  return melhor;
+}
+
 function pagamentoEhTarifaBancaria(pag) {
   const texto = textoConciliacao([pag.plano, pag.historico, pag.fornecedor].filter(Boolean).join(' '));
   return texto.includes('tarifas bancarias')
@@ -2916,31 +2946,34 @@ function gerarSugestoesConciliacao(opcoes = {}) {
 
   pagamentos.filter(p => !sugestoesPorPagamento.has(p.idx)).forEach(pag => {
     const candidatos = candidatosMovimentos(movimentosInfo, pag, { usadosMov });
-    if (candidatos.length === 1) {
-      usadosMov.add(candidatos[0].idxMov);
-      sugestoesPorPagamento.set(pag.idx, { pag, mov: candidatos[0].mov, idxMov: candidatos[0].idxMov, status: 'provável', regra: 'Fornecedor + data + valor', diferenca: 0 });
+    const escolhido = candidatos.length === 1 ? candidatos[0] : melhorCandidatoPorFornecedor(candidatos, pag);
+    if (escolhido) {
+      usadosMov.add(escolhido.idxMov);
+      sugestoesPorPagamento.set(pag.idx, { pag, mov: escolhido.mov, idxMov: escolhido.idxMov, status: 'provável', regra: candidatos.length === 1 ? 'Fornecedor + data + valor' : 'Fornecedor + data + valor, desempate por nome', diferenca: 0 });
     }
   });
 
   pagamentos.filter(p => !sugestoesPorPagamento.has(p.idx)).forEach(pag => {
     const candidatos = candidatosMovimentos(movimentosInfo, pag, { usadosMov, mesmaConta: false });
-    if (candidatos.length === 1) {
-      usadosMov.add(candidatos[0].idxMov);
-      sugestoesPorPagamento.set(pag.idx, { pag, mov: candidatos[0].mov, idxMov: candidatos[0].idxMov, status: 'provável', regra: 'Fornecedor + data + valor, conta diferente', diferenca: 0 });
+    const escolhido = candidatos.length === 1 ? candidatos[0] : melhorCandidatoPorFornecedor(candidatos, pag);
+    if (escolhido) {
+      usadosMov.add(escolhido.idxMov);
+      sugestoesPorPagamento.set(pag.idx, { pag, mov: escolhido.mov, idxMov: escolhido.idxMov, status: 'provável', regra: candidatos.length === 1 ? 'Fornecedor + data + valor, conta diferente' : 'Fornecedor + data + valor, conta diferente, desempate por nome', diferenca: 0 });
     }
   });
 
   pagamentos.filter(p => !sugestoesPorPagamento.has(p.idx)).forEach(pag => {
     const candidatos = candidatosMovimentos(movimentosInfo, pag, { usadosMov, mesmoValor: false, toleranciaCentavos: true, mesmaConta: false });
-    if (candidatos.length === 1) {
-      const diferenca = arredondarMoeda(pag.valor - candidatos[0].valorAbs);
-      usadosMov.add(candidatos[0].idxMov);
+    const escolhido = candidatos.length === 1 ? candidatos[0] : melhorCandidatoPorFornecedor(candidatos, pag);
+    if (escolhido) {
+      const diferenca = arredondarMoeda(pag.valor - escolhido.valorAbs);
+      usadosMov.add(escolhido.idxMov);
       sugestoesPorPagamento.set(pag.idx, {
         pag,
-        mov: candidatos[0].mov,
-        idxMov: candidatos[0].idxMov,
+        mov: escolhido.mov,
+        idxMov: escolhido.idxMov,
         status: 'aproximado',
-        regra: `Fornecedor + data + diferença de centavos até R$ ${fmtValor(TOLERANCIA_CENTAVOS_CONCILIACAO)}`,
+        regra: `Fornecedor + data + diferença de centavos até R$ ${fmtValor(TOLERANCIA_CENTAVOS_CONCILIACAO)}${candidatos.length === 1 ? '' : ', desempate por nome'}`,
         diferenca
       });
     }
@@ -6052,8 +6085,6 @@ iniciarSincronizacaoAutomatica();
 </script>
 </body>
 </html>
-
-
 
 
 
