@@ -1918,9 +1918,12 @@ function renderConciliacaoBancaria() {
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
               <div>
                 <strong>Extratos financeiros e pagamentos carregados</strong>
-                <div class="conciliacao-note">A importação já terminou. Gere a conciliação quando quiser cruzar os movimentos.</div>
+                <div class="conciliacao-note">A importação já terminou. Gere a conciliação e exporte o arquivo final por aqui.</div>
               </div>
-      <button class="btn btn-primary" onclick="iniciarGeracaoConciliacaoBancaria()">Gerar conciliação</button>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+                <button class="btn" onclick="iniciarGeracaoConciliacaoBancaria()">Gerar conciliação</button>
+                <button class="btn btn-blue" onclick="exportarDominioFinalConciliacao()">Exportar Domínio final (.xlsx)</button>
+              </div>
             </div>
           </div>`
         : '';
@@ -2370,6 +2373,30 @@ function iniciarGeracaoConciliacaoBancaria() {
       renderConciliacaoBancaria();
     }
   }, 50);
+}
+
+function exportarDominioFinalConciliacao() {
+  if (linhasImportadas.length === 0) {
+    mostrarMsgConciliacao('Importe a planilha de pagamentos antes de exportar.', 'warn');
+    return;
+  }
+  if (extratoBancarioTemp.length === 0) {
+    mostrarMsgConciliacao('Importe ao menos um extrato financeiro antes de exportar o arquivo final.', 'warn');
+    return;
+  }
+  try {
+    const resultado = gerarSugestoesConciliacao({ redirecionarSeOk: false });
+    const pendencias = resultado?.qtdParaResolver ?? 0;
+    if (pendencias > 0) {
+      mostrarMsgConciliacao(`Ainda há ${pendencias} pendência${pendencias !== 1 ? 's' : ''} para preencher antes de exportar.`, 'orange');
+      abrirModalPendenciasConciliacao();
+      return;
+    }
+    mostrarMsgConciliacao('Conciliação conferida sem pendências. Gerando arquivo final...', 'ok');
+    exportarDominioFinal();
+  } catch (err) {
+    mostrarMsgConciliacao('Erro ao exportar arquivo final: ' + err.message, 'warn');
+  }
 }
 
 function limparExtratoBancario() {
@@ -5875,9 +5902,58 @@ function gerarPagamentosFixoComPercentual() {
   if (linhasExpandidas > 0) showMsg(`${linhasExpandidas} pagamento(s) sem Centro de Custo foram divididos pela regra de %.`, 'ok');
 }
 
+function completarLancamentoPagamentoParaExportacao(lancamento) {
+  if (lancamento.codDebito && lancamento.codCredito) return lancamento;
+  const r = ultimosDadosGerados?.[lancamento.idx];
+  if (!r) return lancamento;
+  const regras = depara[grupoAtivo] || {};
+  const forn = limparTextoECD(r[COLS.FORNECEDOR]);
+  const plano = limparTextoECD(r[COLS.PLANO]);
+  const tipoDoc = limparTextoECD(r[COLS.TIPO_DOC]);
+  const infoDoc = separarNumeroDoHistorico(tipoDoc, r[COLS.NUMERO], r[COLS.HISTORICO]);
+  const historico = infoDoc.historico;
+  const escopoRegra = escopoRegraLinha(r);
+  const codDeparaPrincipal = obterCodigoContaParaDominio(encontrarCodigoRegra(regras, forn, plano, tipoDoc, historico, escopoRegra));
+  const banco = limparTextoECD(r[COLS.CONTA]);
+  const empresaBancoRateio = empresaOrigemLinha(r);
+  const codBanco = codigoContaSemConciliacao(banco, empresaBancoRateio);
+  const centroCustoRateio = centroCustoLinha(r);
+  const valorLiq = arredondarMoeda(r[COLS.VALOR_LIQ]);
+  const linhaRateioNegativa = !!r.__rateio && valorLiq < 0;
+  const tipoAjuste = lancamento.tipoAjuste || tipoAjusteRateioPlano(plano, valorLiq);
+
+  if (tipoAjuste) {
+    const codDebitoAjuste = obterCodigoContaParaDominio(encontrarCodigoRegraAjuste(regras, forn, plano, tipoAjuste, 'DÉBITO', historico, escopoRegra));
+    const codCreditoAjuste = obterCodigoContaParaDominio(encontrarCodigoRegraAjuste(regras, forn, plano, tipoAjuste, 'CRÉDITO', historico, escopoRegra));
+    return { ...lancamento, codDebito: lancamento.codDebito || codDebitoAjuste, codCredito: lancamento.codCredito || codCreditoAjuste };
+  }
+
+  if (rateioIntercompanyLinha(r)) {
+    const naturezaNumerarioBanco = naturezaNumerarioPagamento('EMPRESA DO BANCO', linhaRateioNegativa);
+    const naturezaNumerarioCentro = naturezaNumerarioPagamento('CENTRO DE CUSTO', linhaRateioNegativa);
+    const codNumerarioBanco = codigoNumerarioRateio(regras, empresaBancoRateio, centroCustoRateio, 'EMPRESA DO BANCO', naturezaNumerarioBanco);
+    const codNumerarioCentro = codigoNumerarioRateio(regras, empresaBancoRateio, centroCustoRateio, 'CENTRO DE CUSTO', naturezaNumerarioCentro);
+    if (lancamento.numerarioLado === 'ATIVO') {
+      return linhaRateioNegativa
+        ? { ...lancamento, codDebito: lancamento.codDebito || codBanco, codCredito: lancamento.codCredito || codNumerarioBanco }
+        : { ...lancamento, codDebito: lancamento.codDebito || codNumerarioBanco, codCredito: lancamento.codCredito || codBanco };
+    }
+    if (lancamento.numerarioLado === 'PASSIVO') {
+      return linhaRateioNegativa
+        ? { ...lancamento, codDebito: lancamento.codDebito || codNumerarioCentro, codCredito: lancamento.codCredito || codDeparaPrincipal }
+        : { ...lancamento, codDebito: lancamento.codDebito || codDeparaPrincipal, codCredito: lancamento.codCredito || codNumerarioCentro };
+    }
+  }
+
+  if (linhaRateioNegativa) {
+    return { ...lancamento, codDebito: lancamento.codDebito || codBanco, codCredito: lancamento.codCredito || codDeparaPrincipal };
+  }
+  return { ...lancamento, codDebito: lancamento.codDebito || codDeparaPrincipal, codCredito: lancamento.codCredito || codBanco };
+}
+
 function montarLinhasDominioPagamentos() {
   const lancamentosPagamentos = lancamentosGerados.filter(l => !l.origemConciliacao);
-  return lancamentosPagamentos.map(l => [
+  return lancamentosPagamentos.map(completarLancamentoPagamentoParaExportacao).map(l => [
     l.data, l.codDebito, limparTextoExportacaoDominio(l.codCredito), l.valorLiq, '', limparTextoExportacaoDominio(l.complemento),
     '', limparTextoExportacaoDominio(l.empresa), '', '', limparTextoExportacaoDominio(l.tipoRateio || '')
   ]);
