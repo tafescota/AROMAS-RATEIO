@@ -966,10 +966,31 @@ function encontrarCodigoRegraAjuste(regras, forn, plano, tipoAjuste, ponta, hist
 
 function encontrarCodigoRegraRecebimentoRateio(forn, plano, tipoDoc, historico, escopo = '') {
   const regrasRecebimentos = deparaRecebimentos[grupoAtivo] || {};
-  return obterCodigoContaParaDominio(encontrarCodigoRegra(regrasRecebimentos, forn, plano, tipoDoc, historico, escopo))
+  const codigoDireto = obterCodigoContaParaDominio(encontrarCodigoRegra(regrasRecebimentos, forn, plano, tipoDoc, historico, escopo))
     || obterCodigoContaParaDominio(encontrarCodigoRegraRecebimentoConciliacao(regrasRecebimentos, forn, [tipoDoc, plano, historico].filter(Boolean).join(' - '), escopo))
     || obterCodigoContaParaDominio(encontrarCodigoRegraRecebimentoConciliacao(regrasRecebimentos, tipoDoc || 'Recebimento', [forn, plano, historico].filter(Boolean).join(' - '), escopo))
     || obterCodigoContaParaDominio(encontrarCodigoRegraRecebimentoConciliacao(regrasRecebimentos, 'Recebimento de Cartões', [forn, tipoDoc, plano, historico].filter(Boolean).join(' - '), escopo));
+  if (codigoDireto) return codigoDireto;
+
+  const textoLinha = normalizarTexto([escopo, forn, tipoDoc, plano, historico].filter(Boolean).join(' '));
+  const escopoNorm = normalizarTexto(escopo);
+  const candidatos = Object.entries(regrasRecebimentos)
+    .filter(([chave, codigo]) => codigo && normalizarTexto(chave).includes('recebimento'))
+    .map(([chave, codigo]) => {
+      const chaveNorm = normalizarTexto(chave);
+      const partes = chave.split(' | ');
+      const trecho = partes.slice(Math.max(0, partes.findIndex(p => normalizarTexto(p).startsWith('historico_')) + 1)).join(' ');
+      const termos = normalizarTexto(trecho || chave)
+        .split(/\s+/)
+        .filter(t => t.length >= 4 && !['rateio', 'recebimento', 'cartoes', 'historico', 'exato', 'contem'].includes(t));
+      const unicos = [...new Set(termos)];
+      const matches = unicos.filter(t => textoLinha.includes(t)).length;
+      const escopoOk = !escopoNorm || chaveNorm.includes(escopoNorm) || !chaveNorm.includes('rateio:');
+      return { codigo, score: matches, total: unicos.length, escopoOk };
+    })
+    .filter(r => r.escopoOk && r.score >= Math.min(4, r.total) && r.score >= Math.ceil(r.total * 0.6))
+    .sort((a, b) => b.score - a.score);
+  return candidatos.length ? obterCodigoContaParaDominio(candidatos[0].codigo) : '';
 }
 
 function encontrarRegraProvisao(forn, plano, tipoDoc, historico, escopo = '') {
