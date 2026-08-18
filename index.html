@@ -977,6 +977,7 @@ function encontrarRegraProvisao(forn, plano, tipoDoc, historico, escopo = '') {
 }
 
 function obterChaveRegraNova(item) {
+  if (item.tipoPendencia === 'conta-financeira') return item.chave;
   if (item.pontaNumerario || String(item.chave || '').startsWith('RATEIO NUMERARIOS |')) return item.chave;
   const trecho = limparTextoECD(item.trechoHistorico || '');
   const escopo = item.escopoRegra || escopoRegraItem(item);
@@ -1130,11 +1131,18 @@ function salvarCodigosPreenchidosNoGrupo(coletarDaTela = true) {
   if (!grupoAtivo) return;
   if (coletarDaTela) coletarCodigosNovasChaves();
   const regrasSalvas = Object.assign({}, depara[grupoAtivo] || {});
+  const contasFinanceirasSalvas = Object.assign({}, contasSemConciliacao[grupoAtivo] || {});
   novasChavesTemp.forEach(item => {
     const codigo = obterCodigoContaParaDominio(codigosTemp[item.chave] || '');
-    if (codigo) regrasSalvas[obterChaveRegraNova(item)] = codigo;
+    if (!codigo) return;
+    if (item.tipoPendencia === 'conta-financeira') {
+      contasFinanceirasSalvas[chaveContaFinanceiraEmpresa(item.conta, item.empresaOrigem || item.empresa)] = codigo;
+      return;
+    }
+    regrasSalvas[obterChaveRegraNova(item)] = codigo;
   });
   depara[grupoAtivo] = regrasSalvas;
+  contasSemConciliacao[grupoAtivo] = contasFinanceirasSalvas;
   salvarStorage();
 }
 
@@ -1637,10 +1645,35 @@ function prepararPagamentosImportados(dados, abrirTelaPendencias = true) {
     const centroCusto = centroCustoLinha(r);
     const escopoRegra = escopoRegraLinha(r);
     const valorRateio = arredondarMoeda(r[COLS.VALOR_LIQ]);
+    const contaFinanceira = limparTextoECD(r[COLS.CONTA]);
     const tipoAjusteRateio = r.__rateio ? tipoAjusteRateioPlano(plano, valorRateio) : '';
     if (!forn && !plano) return;
     if (r.__rateio && ehRetencaoFolhaSemLancamento(plano, valorRateio, tipoDoc) && gruposComAbsorvedorPend.has(chaveGuiaAbsorverRateio(r))) {
       return; // retenção (INSS/FGTS/IRRF) absorvida na linha principal do mesmo movimento bancário, não precisa de código próprio
+    }
+    if (linhaPagamentoEhPeloCaixa(r) && !codigoContaSemConciliacao(contaFinanceira, empresaOrigem)) {
+      const chaveContaFinanceira = `CONTA FINANCEIRA | ${contaFinanceira} | ${empresaOrigem}`;
+      if (!vistas.has(chaveContaFinanceira)) {
+        vistas.add(chaveContaFinanceira);
+        novas.push({
+          chave: chaveContaFinanceira,
+          tipoPendencia: 'conta-financeira',
+          fornecedor: 'Conta financeira do pagamento',
+          plano: contaFinanceira,
+          tipoDoc: 'CAIXA / COFRE',
+          historico: `Código da conta ${contaFinanceira} no Domínio para ${empresaOrigem}`,
+          trechoHistorico: '',
+          trechoHistoricoIndices: [],
+          numero: '',
+          empresa: empresaOrigem,
+          empresaOrigem,
+          centroCusto,
+          conta: contaFinanceira,
+          empresaLancamento: empresaLancamentoLinha(r),
+          rateio: false,
+          escopoRegra: ''
+        });
+      }
     }
     if (tipoAjusteRateio) {
       ['DÉBITO', 'CRÉDITO'].forEach(ponta => {
@@ -1705,7 +1738,11 @@ function prepararPagamentosImportados(dados, abrirTelaPendencias = true) {
   novasChavesTemp = novas;
   codigosTemp = {};
   selecionadasLote = new Set();
-  novas.forEach(n => codigosTemp[n.chave] = '');
+  novas.forEach(n => {
+    codigosTemp[n.chave] = n.tipoPendencia === 'conta-financeira'
+      ? codigoContaSemConciliacao(n.conta, n.empresaOrigem || n.empresa)
+      : '';
+  });
   document.getElementById('filtro-lote').value = '';
   document.getElementById('codigo-lote').value = '';
 
@@ -4739,36 +4776,45 @@ function renderNovasChaves() {
     const infoDoc = separarNumeroDoHistorico(tipoDoc, numero, historico);
     const historicoExibido = infoDoc.historico;
     const isAjuste = tipoDoc === 'DESCONTO' || tipoDoc === 'ACRÉSCIMO' || tipoDoc.startsWith('DESCONTO -') || tipoDoc.startsWith('ACRÉSCIMO -');
+    const ehContaFinanceira = linha.item.tipoPendencia === 'conta-financeira';
     const historicoVisual = isAjuste ? `${tipoDoc} - ${historicoExibido}` : historicoExibido;
     const numeroExibido = tipoUsaNumero(tipoDoc) ? infoDoc.numero : '';
     const palavrasHistorico = renderPalavrasHistorico(chave, historicoExibido, trechoHistorico);
     const tipoRateio = tipoRateioOperacao(empresaOrigem || empresa, centroCusto, !!rateio);
     const ehNumerario = !!pontaNumerario;
     const naturezaLabel = (naturezaNumerario || '').toString().toUpperCase();
-    const tipoRateioTitulo = ehNumerario
+    const tipoRateioTitulo = ehContaFinanceira
+      ? 'CAIXA'
+      : ehNumerario
       ? (naturezaLabel === 'PASSIVO' ? 'NUM. PASSIVO' : naturezaLabel === 'ATIVO' ? 'NUM. ATIVO' : 'NUMERÁRIOS')
       : tipoRateio === 'TRANSFERENCIA DE NUMERARIOS'
         ? 'DESPESA'
         : tipoRateio === 'PROPRIO'
           ? 'PRÓPRIO'
           : tipoRateio;
-    const tipoRateioSub = ehNumerario
+    const tipoRateioSub = ehContaFinanceira
+      ? 'Conta financeira'
+      : ehNumerario
       ? 'Transferência'
       : tipoRateio === 'TRANSFERENCIA DE NUMERARIOS'
         ? 'Centro de custo'
         : '';
-    const placeholderCodigo = ehNumerario
+    const placeholderCodigo = ehContaFinanceira
+      ? 'Código da conta do Caixa/Cofre no Domínio'
+      : ehNumerario
       ? `Conta de numerários ${naturezaLabel.toLowerCase()}`
       : tipoRateio === 'TRANSFERENCIA DE NUMERARIOS'
         ? 'Conta da despesa/fornecedor'
         : 'Digite o código ou nome da conta';
-    const dicaCodigo = ehNumerario
+    const dicaCodigo = ehContaFinanceira
+      ? 'Conta financeira usada como crédito do pagamento pelo Caixa/Cofre. A conta da despesa continua na regra do fornecedor/plano.'
+      : ehNumerario
       ? `⚠ Conta de TRÂNSITO entre empresas (numerário ${naturezaLabel.toLowerCase()}) — NÃO é a conta de despesa nem o banco.`
       : tipoRateio === 'TRANSFERENCIA DE NUMERARIOS'
         ? 'Conta contábil da despesa/fornecedor (não é numerário, não é banco).'
         : '';
     const estiloDica = ehNumerario ? 'color:#b45309;font-weight:700' : 'color:var(--text2)';
-    const estiloLinhaNumerario = ehNumerario ? 'background:#fff7ed' : '';
+    const estiloLinhaNumerario = ehNumerario || ehContaFinanceira ? 'background:#fff7ed' : '';
     return `<tr>
       <td><input type="checkbox" data-chave="${escapeAttr(chave)}" ${selecionadasLote.has(chave) ? 'checked' : ''} onchange="alternarSelecionadaLote(this.dataset.chave, this.checked)"></td>
       <td title="${escapeAttr(empresa || '')}"><div class="cell-main">${escapeHtml(empresa || '')}</div></td>
@@ -4778,7 +4824,9 @@ function renderNovasChaves() {
       <td title="${escapeAttr(plano)}"><div class="cell-main">${escapeHtml(plano)}</div></td>
       <td title="${escapeAttr(historicoVisual)}" style="color:var(--text2)">
         ${isAjuste ? `<div style="font-weight:700;color:#92400e;margin-bottom:4px">${escapeHtml(tipoDoc)} -</div>` : ''}
-        ${historicoExibido ? `<div class="historico-regra-label">Clique nas palavras da regra:</div>${palavrasHistorico}` : ''}
+        ${ehContaFinanceira
+          ? `<div class="cell-subtle">${escapeHtml(historicoExibido)}</div>`
+          : historicoExibido ? `<div class="historico-regra-label">Clique nas palavras da regra:</div>${palavrasHistorico}` : ''}
       </td>
       <td title="${escapeAttr([tipoRateioTitulo, tipoRateioSub].filter(Boolean).join(' - '))}" style="color:var(--text2)">${tipoRateioTitulo ? `<span class="badge ${tipoRateio === 'PROPRIO' ? 'badge-blue' : ''}">${escapeHtml(tipoRateioTitulo)}</span>${tipoRateioSub ? `<div class="cell-subtle">${escapeHtml(tipoRateioSub)}</div>` : ''}` : ''}</td>
       <td title="${escapeAttr(numeroExibido)}" style="color:var(--text2)">${escapeHtml(numeroExibido)}</td>
@@ -5057,11 +5105,17 @@ function aplicarCodigoEmLote() {
   selecionadasLote.forEach(chave => { codigosTemp[chave] = codigo; });
   // Salva imediatamente no depara do grupo ativo
   const regrasSalvas = Object.assign({}, depara[grupoAtivo] || {});
+  const contasFinanceirasSalvas = Object.assign({}, contasSemConciliacao[grupoAtivo] || {});
   selecionadasLote.forEach(chave => {
     const item = novasChavesTemp.find(n => n.chave === chave);
-    regrasSalvas[item ? obterChaveRegraNova(item) : chave] = codigo;
+    if (item?.tipoPendencia === 'conta-financeira') {
+      contasFinanceirasSalvas[chaveContaFinanceiraEmpresa(item.conta, item.empresaOrigem || item.empresa)] = codigo;
+    } else {
+      regrasSalvas[item ? obterChaveRegraNova(item) : chave] = codigo;
+    }
   });
   depara[grupoAtivo] = regrasSalvas;
+  contasSemConciliacao[grupoAtivo] = contasFinanceirasSalvas;
   salvarStorage();
   selecionadasLote.clear();
   renderNovasChaves();
