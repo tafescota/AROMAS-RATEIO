@@ -3903,6 +3903,7 @@ function resolverCodigoRecebimentoRateio(item, codigoRecebimento = '') {
   return obterCodigoContaParaDominio(encontrarCodigoRegraRecebimentoConciliacao(regrasRecebimentos, tipo, historico, escopo))
     || obterCodigoContaParaDominio(encontrarCodigoRegraRecebimentoConciliacao(regrasRecebimentos, tipo, [fornecedor, plano, historico].filter(Boolean).join(' - '), escopo))
     || obterCodigoContaParaDominio(encontrarCodigoRegra(regrasRecebimentos, fornecedor, plano, tipo, historico, escopo))
+    || encontrarCodigoRegraRecebimentoRateio(fornecedor, plano, tipo, historico, escopo)
     || obterCodigoContaParaDominio(encontrarCodigoRegra(regrasPagamentos, fornecedor, plano, tipo, historico, escopo))
     || obterCodigoContaParaDominio(plano);
 }
@@ -6008,7 +6009,34 @@ function montarLinhasDominioPagamentos() {
   ]);
 }
 
+function completarLinhasRecebimentoCartoesComRegras(linhas) {
+  return linhas.map(linha => {
+    const debito = limparTextoECD(linha[1]);
+    const credito = limparTextoECD(linha[2]);
+    if (debito && credito) return linha;
+    const historico = limparTextoECD(linha[5]);
+    if (!normalizarTexto(historico).includes('recebimento de cartoes')) return linha;
+    const partes = historico.split(' - ').map(limparTextoECD).filter(Boolean);
+    const tipo = partes[0] || 'Recebimento de Cartões';
+    const fornecedor = partes[1] || tipo;
+    const plano = partes.length >= 2 ? partes[partes.length - 2] : '';
+    const hist = partes.slice(1, -2).join(' - ') || partes.slice(1).join(' - ');
+    const escopo = linha[10] === 'TRANSFERENCIA DE NUMERARIOS'
+      ? escopoRegraPagamento('', limparTextoECD(linha[7]), true)
+      : '';
+    const codigo = encontrarCodigoRegraRecebimentoRateio(fornecedor, plano, tipo, hist, escopo)
+      || encontrarCodigoRegraRecebimentoRateio(fornecedor, plano, tipo, historico, '')
+      || obterCodigoContaParaDominio(plano);
+    if (!codigo) return linha;
+    const nova = linha.slice();
+    if (!nova[1]) nova[1] = codigo;
+    if (!nova[2]) nova[2] = codigo;
+    return nova;
+  });
+}
+
 function bloquearExportacaoComContasVazias(linhas) {
+  linhas = completarLinhasRecebimentoCartoesComRegras(linhas);
   const faltantes = linhas
     .map((linha, idx) => ({ idx: idx + 2, debito: limparTextoECD(linha[1]), credito: limparTextoECD(linha[2]), valor: linha[3], historico: linha[5], empresa: linha[7] }))
     .filter(l => !l.debito || !l.credito);
@@ -6027,7 +6055,7 @@ function bloquearExportacaoComContasVazias(linhas) {
 }
 
 function exportarDominioPagamentos() {
-  const linhas = montarLinhasDominioPagamentos();
+  const linhas = completarLinhasRecebimentoCartoesComRegras(montarLinhasDominioPagamentos());
   if (linhas.length === 0) {
     alert('Gere os lançamentos antes de exportar.');
     return;
@@ -6050,7 +6078,7 @@ function exportarDominioFinal() {
   const linhasConciliacao = montarLinhasDominioConciliacao();
   if (linhasConciliacao === null) return;
 
-  const linhas = [...linhasPagamentos, ...linhasConciliacao];
+  const linhas = completarLinhasRecebimentoCartoesComRegras([...linhasPagamentos, ...linhasConciliacao]);
   if (bloquearExportacaoComContasVazias(linhas)) return;
   linhas.forEach(l => { l[6] = ''; });
   if (linhas.length > 0) linhas[0][6] = 1;
