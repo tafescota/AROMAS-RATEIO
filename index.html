@@ -964,6 +964,14 @@ function encontrarCodigoRegraAjuste(regras, forn, plano, tipoAjuste, ponta, hist
   return pontaNaturalLegada ? encontrarCodigoRegra(regras, forn, plano, tipoAjuste, historico, escopo) : '';
 }
 
+function encontrarCodigoRegraRecebimentoRateio(forn, plano, tipoDoc, historico, escopo = '') {
+  const regrasRecebimentos = deparaRecebimentos[grupoAtivo] || {};
+  return obterCodigoContaParaDominio(encontrarCodigoRegra(regrasRecebimentos, forn, plano, tipoDoc, historico, escopo))
+    || obterCodigoContaParaDominio(encontrarCodigoRegraRecebimentoConciliacao(regrasRecebimentos, forn, [tipoDoc, plano, historico].filter(Boolean).join(' - '), escopo))
+    || obterCodigoContaParaDominio(encontrarCodigoRegraRecebimentoConciliacao(regrasRecebimentos, tipoDoc || 'Recebimento', [forn, plano, historico].filter(Boolean).join(' - '), escopo))
+    || obterCodigoContaParaDominio(encontrarCodigoRegraRecebimentoConciliacao(regrasRecebimentos, 'Recebimento de Cartões', [forn, tipoDoc, plano, historico].filter(Boolean).join(' - '), escopo));
+}
+
 function encontrarRegraProvisao(forn, plano, tipoDoc, historico, escopo = '') {
   if (!grupoAtivo) return null;
   const regras = deparaProvisao[grupoAtivo] || {};
@@ -5913,7 +5921,8 @@ function completarLancamentoPagamentoParaExportacao(lancamento) {
   const infoDoc = separarNumeroDoHistorico(tipoDoc, r[COLS.NUMERO], r[COLS.HISTORICO]);
   const historico = infoDoc.historico;
   const escopoRegra = escopoRegraLinha(r);
-  const codDeparaPrincipal = obterCodigoContaParaDominio(encontrarCodigoRegra(regras, forn, plano, tipoDoc, historico, escopoRegra));
+  const codDeparaPrincipal = obterCodigoContaParaDominio(encontrarCodigoRegra(regras, forn, plano, tipoDoc, historico, escopoRegra))
+    || encontrarCodigoRegraRecebimentoRateio(forn, plano, tipoDoc, historico, escopoRegra);
   const banco = limparTextoECD(r[COLS.CONTA]);
   const empresaBancoRateio = empresaOrigemLinha(r);
   const codBanco = codigoContaSemConciliacao(banco, empresaBancoRateio);
@@ -5967,6 +5976,12 @@ function bloquearExportacaoComContasVazias(linhas) {
   const exemplos = faltantes.slice(0, 5).map(l =>
     `Linha ${l.idx}: ${l.empresa || 'sem empresa'} - R$ ${fmtValor(l.valor)} - ${l.historico || ''}`
   ).join('\n');
+  if (faltantes.some(l => normalizarTexto(l.historico).includes('recebimento de cartoes'))) {
+    tipoRegrasAtivo = 'recebimentos';
+    mostrarTela('tela-regras');
+    alert(`${faltantes.length} lançamento(s) de recebimento/cartões ainda sem conta de débito ou crédito. Abri as regras de recebimentos para conferir o De-Para.\n\n${exemplos}`);
+    return true;
+  }
   alert(`${faltantes.length} lançamento(s) sem conta de débito ou crédito. Preencha o De-Para de bancos/caixas por empresa e as pendências antes de exportar.\n\n${exemplos}`);
   return true;
 }
