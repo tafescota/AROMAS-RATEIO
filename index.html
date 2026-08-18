@@ -161,6 +161,7 @@
 
   .drop-area { border: 2px dashed var(--border2); border-radius: var(--radius); padding: 40px 20px; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
   .drop-area:hover, .drop-area.drag { border-color: var(--blue); background: var(--blue-bg); }
+  .drop-area.processando { cursor: wait; pointer-events: none; border-color: var(--blue); background: #eef7ff; opacity: .82; }
   .drop-icon { font-size: 36px; margin-bottom: 8px; }
   .drop-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
   .drop-sub { font-size: 12px; color: var(--text2); }
@@ -169,6 +170,11 @@
 
   .progress-bar { height: 4px; background: var(--bg3); border-radius: 2px; margin: 12px 0; overflow: hidden; }
   .progress-fill { height: 100%; background: var(--blue); border-radius: 2px; transition: width 0.3s; }
+  .progress-fill.indeterminate { width: 38%; animation: progress-slide 1.1s ease-in-out infinite; }
+  @keyframes progress-slide {
+    0% { transform: translateX(-110%); }
+    100% { transform: translateX(280%); }
+  }
   .conciliacao-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
   .conciliacao-note { color: var(--text2); font-size: 13px; line-height: 1.55; }
   .package-list { display: grid; gap: 8px; margin-top: 12px; }
@@ -303,6 +309,7 @@
       <div class="drop-title">Arraste a planilha aqui ou clique para selecionar</div>
       <div class="drop-sub" id="drop-sub-importacao">Arquivo de Parcelas de Títulos exportado do financeiro (.xlsx ou .xlsm)</div>
     </div>
+    <div id="status-importacao-planilhas" style="display:none;margin-top:14px"></div>
   </div>
 
   <!-- TELA PLANO DE CONTAS -->
@@ -608,6 +615,7 @@ let saldosAnterioresExtratoTemp = {}; // { [conta]: valor } — usado só pelo p
 let infoExtratoBancarioTemp = null;
 let mostrarPreviewExtrato = false;
 let processandoExtratoBancario = false;
+let processandoImportacaoPlanilhas = false;
 let gerandoConciliacaoBancaria = false;
 let conciliacaoItensTemp = [];
 let codigosConciliacaoTemp = {};
@@ -823,6 +831,22 @@ function empresaBancoRateioPorConta(conta, empresaFallback = '') {
   ];
   const encontrada = contasAromas.find(item => contaNorm.includes(item.termo));
   return encontrada ? encontrada.empresa : fallback;
+}
+
+function contaFinanceiraEhCaixa(conta) {
+  const contaNorm = normalizarTexto(conta);
+  return contaNorm.includes('caixa loja')
+    || contaNorm.includes('caixa vd')
+    || contaNorm.includes('conta cofre')
+    || contaNorm.includes('cofre escritorio');
+}
+
+function pagamentoEhPeloCaixa(pag) {
+  return contaFinanceiraEhCaixa(pag?.conta);
+}
+
+function linhaPagamentoEhPeloCaixa(r) {
+  return contaFinanceiraEhCaixa(r?.[COLS.CONTA]);
 }
 
 function rateioIntercompanyLinha(r) {
@@ -1263,6 +1287,23 @@ function selecionarModoImportacaoPagamentos(modo) {
   const blocoRecebInicio = document.getElementById('importar-recebimentos-rateio-inicio');
   if (blocoRecebInicio) blocoRecebInicio.style.display = modoImportacaoPagamentos === 'rateio' ? '' : 'none';
   renderResumoRecebimentosRateio();
+}
+
+function mostrarStatusImportacaoPlanilhas(texto, tipo = 'orange', processando = false) {
+  const el = document.getElementById('status-importacao-planilhas');
+  if (!el) return;
+  el.style.display = texto ? '' : 'none';
+  el.innerHTML = texto ? `<div class="alert alert-${tipo}" style="margin-bottom:0;display:block">
+    <div style="font-weight:700;margin-bottom:4px">${escapeHtml(texto)}</div>
+    ${processando ? '<div class="progress-bar" style="margin:8px 0 0"><div class="progress-fill indeterminate"></div></div>' : ''}
+  </div>` : '';
+}
+
+function atualizarEstadoImportacaoPlanilhas() {
+  const drop = document.getElementById('drop-area');
+  const input = document.getElementById('file-input');
+  if (drop) drop.classList.toggle('processando', processandoImportacaoPlanilhas);
+  if (input) input.disabled = processandoImportacaoPlanilhas;
 }
 
 function indiceCabecalhoPlanilha(raw) {
@@ -2644,11 +2685,12 @@ function pagamentosImportadosConciliacao(contasBanco = new Set()) {
   if (linhasImportadasModo !== 'rateio') {
     return linhasImportadas
       .map((row, idx) => pagamentoConciliacao(row, idx))
-      .filter(p => (contasBanco.size === 0 || contasBanco.has(normalizarTexto(p.conta))) && p.valor > 0);
+      .filter(p => !pagamentoEhPeloCaixa(p) && (contasBanco.size === 0 || contasBanco.has(normalizarTexto(p.conta))) && p.valor > 0);
   }
   const gruposRateio = new Map();
   linhasImportadas.forEach((row, idx) => {
     const pag = pagamentoConciliacao(row, idx);
+    if (pagamentoEhPeloCaixa(pag)) return;
     if (contasBanco.size > 0 && !contasBanco.has(normalizarTexto(pag.conta))) return;
     const chave = [
       pag.dataKey,
@@ -2896,6 +2938,7 @@ function gerarSugestoesConciliacao(opcoes = {}) {
 
   const transferenciasPareadas = indicesTransferenciasPareadas(extratoBancarioTemp);
   const contasBanco = new Set(contasExtrato(extratoBancarioTemp).map(normalizarTexto));
+  const pagamentosPeloCaixa = linhasImportadas.filter(linhaPagamentoEhPeloCaixa).length;
   const pagamentos = pagamentosImportadosConciliacao(contasBanco);
   const movimentos = extratoBancarioTemp
     .filter(movimentoEhSaidaConciliavelPagamento);
@@ -3055,14 +3098,14 @@ function gerarSugestoesConciliacao(opcoes = {}) {
     .map((mov, idxMov) => ({ mov, idxMov }))
     .filter(item => !usadosMov.has(item.idxMov));
 
-  const resultado = renderSugestoesConciliacao(sugestoes, pagamentos.length, movimentos.length, entradas, saidasExtras, transferenciasIgnoradas);
+  const resultado = renderSugestoesConciliacao(sugestoes, pagamentos.length, movimentos.length, entradas, saidasExtras, transferenciasIgnoradas, pagamentosPeloCaixa);
   if (redirecionarSeOk && resultado?.qtdParaResolver === 0) {
     setTimeout(() => mostrarTela('tela-resultado'), 0);
   }
   return resultado;
 }
 
-function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, entradas = [], saidasExtras = [], transferenciasIgnoradas = []) {
+function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, entradas = [], saidasExtras = [], transferenciasIgnoradas = [], pagamentosPeloCaixa = 0) {
   const el = document.getElementById('resultado-conciliacao-bancaria');
   const conciliadas = sugestoes.filter(s => s.mov);
   const semSugestao = sugestoes.length - conciliadas.length;
@@ -3260,10 +3303,11 @@ function renderSugestoesConciliacao(sugestoes, qtdPagamentos, qtdMovimentos, ent
       <div class="metric metric-focus-ok"><div class="metric-label">Pagamentos conciliados</div><div class="metric-value ok">${conciliadas.length}</div></div>
       <div class="metric ${semSugestao > 0 ? 'metric-focus-warn' : 'metric-muted'}"><div class="metric-label">Pagamentos pendentes</div><div class="metric-value ${semSugestao > 0 ? 'warn' : 'ok'}">${semSugestao}</div></div>
       <div class="metric ${saidasExtrasPendentesVisiveis.length > 0 ? 'metric-focus-warn' : 'metric-muted'}"><div class="metric-label">Saídas sem pagamento</div><div class="metric-value ${saidasExtrasPendentesVisiveis.length > 0 ? 'warn' : 'ok'}">${saidasExtrasPendentesVisiveis.length}</div><div class="metric-sub">${saidasExtrasPreenchidasVisiveis.length} preenchida${saidasExtrasPreenchidasVisiveis.length !== 1 ? 's' : ''}</div></div>
+      ${pagamentosPeloCaixa ? `<div class="metric metric-muted"><div class="metric-label">Pagamentos pelo Caixa</div><div class="metric-value metric-text">${pagamentosPeloCaixa}</div><div class="metric-sub">seguem o relatório de pagamentos</div></div>` : ''}
       <div class="metric metric-muted"><div class="metric-label">Transferências entre contas</div><div class="metric-value metric-text">${transferenciasIgnoradas.length}</div><div class="metric-sub">não viram receita/despesa duplicada</div></div>
       ${itensRecebimentoRateio.length ? `<div class="metric metric-muted"><div class="metric-label">Recebimentos rateio</div><div class="metric-value metric-text">${itensRecebimentoRateio.length}</div><div class="metric-sub">${numerariosPendentes.length} numerário${numerariosPendentes.length !== 1 ? 's' : ''} pendente${numerariosPendentes.length !== 1 ? 's' : ''}</div></div>` : ''}
     </div>
-    <p class="conciliacao-note" style="margin-bottom:10px">Pagamentos são validados contra as saídas reais do extrato. Transferências entre caixa, banco e aplicação são tratadas como troca de conta financeira e não entram como receita/despesa novamente.</p>
+    <p class="conciliacao-note" style="margin-bottom:10px">Pagamentos de Banco/Bradesco são validados contra as saídas reais do extrato. Pagamentos cuja conta financeira é Caixa/Cofre seguem o relatório de pagamentos de cada empresa e não precisam aparecer no extrato do Caixa.</p>
     <div class="conciliation-actions">
       ${qtdParaResolver > 0 ? '<button class="btn btn-primary" onclick="abrirModalPendenciasConciliacao()">Preencher pendências</button>' : ''}
       <button class="btn" onclick="mostrarTela('tela-resultado')">Voltar aos lançamentos</button>
@@ -4012,15 +4056,28 @@ function excluirGrupo(g) {
 
 // ---------- ARQUIVO ----------
 function onFileChange(e) {
+  if (processandoImportacaoPlanilhas) {
+    mostrarStatusImportacaoPlanilhas('Importação em andamento. Aguarde terminar para selecionar outro arquivo.', 'orange', true);
+    e.target.value = '';
+    return;
+  }
   const files = Array.from(e.target.files || []);
   if (files.length > 0) processarArquivosImportacao(files);
   e.target.value = '';
 }
-function dragOver(e) { e.preventDefault(); document.getElementById('drop-area').classList.add('drag'); }
+function dragOver(e) {
+  e.preventDefault();
+  if (processandoImportacaoPlanilhas) return;
+  document.getElementById('drop-area').classList.add('drag');
+}
 function dragLeave() { document.getElementById('drop-area').classList.remove('drag'); }
 function onDrop(e) {
   e.preventDefault();
   document.getElementById('drop-area').classList.remove('drag');
+  if (processandoImportacaoPlanilhas) {
+    mostrarStatusImportacaoPlanilhas('Importação em andamento. Aguarde terminar para soltar outro arquivo.', 'orange', true);
+    return;
+  }
   const files = Array.from(e.dataTransfer.files || []);
   if (files.length > 0) processarArquivosImportacao(files);
 }
@@ -4493,15 +4550,34 @@ function adicionarRecebimentosRateio(resultados) {
 
 async function processarArquivosImportacao(files) {
   if (!grupoAtivo) { alert('Selecione um grupo antes de importar.'); return; }
+  if (processandoImportacaoPlanilhas) {
+    mostrarStatusImportacaoPlanilhas('Importação em andamento. Aguarde terminar para importar novamente.', 'orange', true);
+    return;
+  }
+  processandoImportacaoPlanilhas = true;
+  atualizarEstadoImportacaoPlanilhas();
+  mostrarStatusImportacaoPlanilhas(`Importando ${files.length} arquivo${files.length !== 1 ? 's' : ''}. Aguarde...`, 'orange', true);
+  await new Promise(resolve => setTimeout(resolve, 30));
   selecionarModoImportacaoPagamentos(modoImportacaoDoGrupo(grupoAtivo));
-  if (modoImportacaoPagamentos !== 'rateio') {
-    const file = files[0];
-    const reader = new FileReader();
-    reader.onload = function(e) {
+  try {
+    if (modoImportacaoPagamentos !== 'rateio') {
+      const file = files[0];
+      const dadosLeitura = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            const data = new Uint8Array(e.target.result);
+            const wb = XLSX.read(data, { type: 'array', cellDates: true });
+            resolve(linhasPlanilhaTitulos(wb));
+          } catch(err) {
+            reject(err);
+          }
+        };
+        reader.onerror = () => reject(new Error('Erro ao ler o arquivo.'));
+        reader.readAsArrayBuffer(file);
+      });
       try {
-        const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, { type: 'array', cellDates: true });
-        const leitura = linhasPlanilhaTitulos(wb);
+        const leitura = dadosLeitura;
         const dados = leitura.dados;
         if (dados.length === 0) {
           alert('Nenhum dado encontrado. Verifique se é a planilha de Parcelas de Títulos.');
@@ -4512,15 +4588,13 @@ async function processarArquivosImportacao(files) {
         if (leitura.ignoradas > 0) {
           showMsg(`${dados.length} pagamento${dados.length !== 1 ? 's' : ''} liquidado${dados.length !== 1 ? 's' : ''} importado${dados.length !== 1 ? 's' : ''}. ${leitura.ignoradas} linha${leitura.ignoradas !== 1 ? 's' : ''} sem liquidação, cancelada${leitura.ignoradas !== 1 ? 's' : ''}, baixada${leitura.ignoradas !== 1 ? 's' : ''} ou zerada${leitura.ignoradas !== 1 ? 's' : ''} foi${leitura.ignoradas !== 1 ? 'ram' : ''} ignorada${leitura.ignoradas !== 1 ? 's' : ''}.`, 'ok');
         }
+        mostrarStatusImportacaoPlanilhas(`${dados.length} pagamento${dados.length !== 1 ? 's' : ''} importado${dados.length !== 1 ? 's' : ''} com sucesso.`, 'ok', false);
       } catch(err) {
         alert('Erro ao ler o arquivo: ' + err.message);
       }
-    };
-    reader.readAsArrayBuffer(file);
-    return;
-  }
+      return;
+    }
 
-  try {
     const resultados = await Promise.all(files.map(classificarArquivoRateioImportacao));
     const pagamentos = resultados.filter(r => r.tipo === 'pagamento').flatMap(r => r.dados || []);
     const pagamentosIgnorados = resultados.filter(r => r.tipo === 'pagamento').reduce((s, r) => s + (r.ignoradas || 0), 0);
@@ -4528,6 +4602,7 @@ async function processarArquivosImportacao(files) {
     const qtdRecebimentos = recebimentos.length ? adicionarRecebimentosRateio(recebimentos) : 0;
     if (pagamentos.length === 0) {
       showMsg(`${qtdRecebimentos} recebimento${qtdRecebimentos !== 1 ? 's' : ''} por rateio importado${qtdRecebimentos !== 1 ? 's' : ''}. Nenhuma planilha de pagamento foi selecionada.`, 'ok');
+      mostrarStatusImportacaoPlanilhas(`${qtdRecebimentos} recebimento${qtdRecebimentos !== 1 ? 's' : ''} por rateio importado${qtdRecebimentos !== 1 ? 's' : ''}.`, 'ok', false);
       return;
     }
     linhasImportadasModo = 'rateio';
@@ -4538,8 +4613,13 @@ async function processarArquivosImportacao(files) {
       if (pagamentosIgnorados > 0) partes.push(`${pagamentosIgnorados} linha${pagamentosIgnorados !== 1 ? 's' : ''} de pagamento ignorada${pagamentosIgnorados !== 1 ? 's' : ''} por status/data/valor`);
       showMsg(partes.join(' e ') + ' importados.', 'ok');
     }
+    mostrarStatusImportacaoPlanilhas(`${pagamentos.length} pagamento${pagamentos.length !== 1 ? 's' : ''}${qtdRecebimentos > 0 ? ` e ${qtdRecebimentos} recebimento${qtdRecebimentos !== 1 ? 's' : ''}` : ''} importado${pagamentos.length + qtdRecebimentos !== 1 ? 's' : ''} com sucesso.`, 'ok', false);
   } catch(err) {
     alert('Erro ao ler os arquivos: ' + err.message);
+    mostrarStatusImportacaoPlanilhas('Erro ao importar: ' + err.message, 'warn', false);
+  } finally {
+    processandoImportacaoPlanilhas = false;
+    atualizarEstadoImportacaoPlanilhas();
   }
 }
 
@@ -6085,9 +6165,3 @@ iniciarSincronizacaoAutomatica();
 </script>
 </body>
 </html>
-
-
-
-
-
-
